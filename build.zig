@@ -6,15 +6,15 @@ const vkgen = @import("lib/vulkan/generator/index.zig");
 const VK_REG_XML = "vulkan_registry.xml";
 
 fn integrateVulkanAndSDL(
-    c: *std.Build.Step.Compile, gen: *vkgen.VkGenerateStep, sdk: *Sdk,
+    c: *std.Build.Step.Compile, vk_module: *std.Build.Module, sdk: *Sdk,
 ) void {
     const vulkan_module_name = "vulkan";
     const sdl_module_name = "sdl2";
 
-    c.addModule(vulkan_module_name, gen.getModule());
+    c.addModule(vulkan_module_name, vk_module);
 
     sdk.link(c, .dynamic);
-    c.addModule(sdl_module_name, sdk.getWrapperModuleVulkan(gen.getModule()));
+    c.addModule(sdl_module_name, sdk.getWrapperModuleVulkan(vk_module));
 }
 
 // Although this function looks imperative, note that its job is to
@@ -34,6 +34,7 @@ pub fn build(b: *std.Build) void {
 
     // prepare vulkan and SDL for integration
     const gen = vkgen.VkGenerateStep.create(b, VK_REG_XML);
+    const vk_module = gen.getModule();
     const sdk = Sdk.init(b, null);
 
     const exe = b.addExecutable(.{
@@ -44,7 +45,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    integrateVulkanAndSDL(exe, gen, sdk);
+    integrateVulkanAndSDL(exe, vk_module, sdk);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -81,7 +82,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    integrateVulkanAndSDL(unit_tests, gen, sdk);
+    integrateVulkanAndSDL(unit_tests, vk_module, sdk);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
