@@ -1,0 +1,6 @@
+[submodule "lib/SDL"]
+	path = lib/SDL
+	url = https://github.com/MasterQ32/SDL.zig
+[submodule "lib/vulkan"]
+	path = lib/vulkan
+	url = https://github.com/Snektron/vulkan-zig
