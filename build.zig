@@ -1,8 +1,21 @@
 const std = @import("std");
 
-const Sdk = @import("lib/SDL/Sdk.zig");
+// const Sdk = @import("lib/SDL/Sdk.zig"); // seemingly deprecated
+const Sdk = @import("lib/SDL/build.zig");
 const vkgen = @import("lib/vulkan/generator/index.zig");
-const VK_XML_PATH = "vulkan_registry.xml";
+const VK_REG_XML = "vulkan_registry.xml";
+
+fn integrateVulkanAndSDL(
+    c: *std.Build.Step.Compile, gen: *vkgen.VkGenerateStep, sdk: *Sdk,
+) void {
+    const vulkan_module_name = "vulkan";
+    const sdl_module_name = "sdl2";
+
+    c.addModule(vulkan_module_name, gen.getModule());
+
+    sdk.link(c, .dynamic);
+    c.addModule(sdl_module_name, sdk.getWrapperModuleVulkan(gen.getModule()));
+}
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -19,6 +32,10 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    // prepare vulkan and SDL for integration
+    const gen = vkgen.VkGenerateStep.create(b, VK_REG_XML);
+    const sdk = Sdk.init(b, null);
+
     const exe = b.addExecutable(.{
         .name = "polygon_walk",
         // In this case the main source file is merely a path, however, in more
@@ -27,17 +44,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-
-    { // SDL
-        const sdk = Sdk.init(b, null);
-        sdk.link(exe, .dynamic);
-        exe.addModule("sdl2", sdk.getWrapperModule());
-    }
-
-    { // vulkan
-        const gen = vkgen.VkGenerateStep.create(b, VK_XML_PATH, "vk.zig");
-        exe.addModule("vulkan", gen);
-    }
+    integrateVulkanAndSDL(exe, gen, sdk);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -74,6 +81,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    integrateVulkanAndSDL(unit_tests, gen, sdk);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
