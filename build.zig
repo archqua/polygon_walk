@@ -5,16 +5,27 @@ const Sdk = @import("lib/SDL/build.zig");
 const vkgen = @import("lib/vulkan/generator/index.zig");
 const VK_REG_XML = "vulkan_registry.xml";
 
+const compile_shaders_cmd = [_][]const u8{
+    "glslc", "--target-env=vulkan1.2",
+};
+
+
 fn integrateVulkanAndSDL(
-    c: *std.Build.Step.Compile, vk_module: *std.Build.Module, sdk: *Sdk,
+    c: *std.Build.Step.Compile,
+    vk_module: *std.Build.Module,
+    shader_module: *std.Build.Module,
+    sdk: *Sdk,
 ) void {
     const vulkan_module_name = "vulkan";
+    const shader_module_name = "shaders";
     const sdl_module_name = "sdl2";
 
     c.addModule(vulkan_module_name, vk_module);
+    c.addModule(shader_module_name, shader_module);
 
     sdk.link(c, .dynamic);
-    c.addModule(sdl_module_name, sdk.getWrapperModuleVulkan(vk_module));
+    // c.addModule(sdl_module_name, sdk.getWrapperModuleVulkan(vk_module));  // this breaks somehow
+    c.addModule(sdl_module_name, sdk.getWrapperModule());
 }
 
 // Although this function looks imperative, note that its job is to
@@ -33,9 +44,19 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // prepare vulkan and SDL for integration
-    const gen = vkgen.VkGenerateStep.create(b, VK_REG_XML);
-    const vk_module = gen.getModule();
+    const vk_gen_step = vkgen.VkGenerateStep.create(b, VK_REG_XML);
+    const vk_module = vk_gen_step.getModule();
+    const shaders =
+        vkgen.ShaderCompileStep.create(b, &compile_shaders_cmd, "-o");
+    shaders.add("naive_vert", "shaders/naive.vert", .{});
+    shaders.add("naive_frag", "shaders/naive.frag", .{});
+    const shader_module = shaders.getModule();
     const sdk = Sdk.init(b, null);
+
+    // local modules
+    const util = b.addModule("util", .{
+        .source_file = .{.path = "src/util.zig"},
+    });
 
     const exe = b.addExecutable(.{
         .name = "polygon_walk",
@@ -45,7 +66,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    integrateVulkanAndSDL(exe, vk_module, sdk);
+    integrateVulkanAndSDL(exe, vk_module, shader_module, sdk);
+    exe.addModule("util", util);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -82,7 +104,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    integrateVulkanAndSDL(unit_tests, vk_module, sdk);
+    integrateVulkanAndSDL(unit_tests, vk_module, shader_module, sdk);
+    unit_tests.addModule("util", util);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
