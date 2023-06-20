@@ -12,6 +12,7 @@ const Graphics = @This();
 
 pub const device_extensions = [_][*:0]const u8{vk.extension_info.khr_swapchain.name};
 pub const max_frames_in_flight = 2;
+pub const n_drawable_layers = 16;
 
 window: sdl.Window = undefined,
 
@@ -49,16 +50,14 @@ semaphores: [max_frames_in_flight] struct {
 } = undefined,
 fence: [max_frames_in_flight]vk.Fence = undefined,
 
-drawable_infos: [2]PrimitiveObjectInfo = [_]PrimitiveObjectInfo{.{}} ** 2,
-// background: PrimitiveObject = undefined,
-// objects: PrimitiveObject = undefined,
+drawable_state: DrawableState = .{},
 
 frame_counter: u32 = 0,
 
+resize_requested: bool = false,
+
 ator: Allocator = undefined,
 
-pub const background_index = 0;
-pub const objects_index = 1;
 
 pub const Settings = struct {
     application_name: [:0]const u8 = "",
@@ -72,7 +71,7 @@ pub const Settings = struct {
         y: sdl.WindowPosition = .{ .centered = {} },
         width: usize = 0,
         height: usize = 0,
-        flags: sdl.WindowFlags = .{.context = .vulkan},
+        flags: sdl.WindowFlags = .{},
     };
 };
 pub fn init(settings: Settings, ator: Allocator) !Graphics {
@@ -117,12 +116,12 @@ pub fn init(settings: Settings, ator: Allocator) !Graphics {
 
     return res;
 }
-pub fn terminate(self: Graphics, device_wait_idle: bool) !void {
+pub fn terminate(self: *const Graphics, device_wait_idle: bool) !void {
     if (device_wait_idle)
         try self.vkd.deviceWaitIdle(self.device);
     self.deinit();
 }
-fn deinit(self: Graphics) void {
+fn deinit(self: *const Graphics) void {
     self.deinitSyncObjects();
     self.deinitStagerFinalBufferPair();
     self.deinitCommandPools();
@@ -146,14 +145,16 @@ fn initWindow(
         .audio = true,
     });
     errdefer sdl.quit();
+    var flags = settings.flags;
+    flags.context = .vulkan;
     self.window = try sdl.createWindow(
         application_name,
         settings.x, .{ .centered = {} },
         settings.width, settings.height,
-        settings.flags,
+        flags,
     );
 }
-fn deinitWindow(self: Graphics) void {
+fn deinitWindow(self: *const Graphics) void {
     self.window.destroy();
     sdlvk.unloadLibrary();  // make this conditional
     sdl.quit();
@@ -223,7 +224,7 @@ fn initInstance(
         .validation_available = validation_available,
     };
 }
-fn deinitInstance(self: Graphics) void {
+fn deinitInstance(self: *const Graphics) void {
     if (vk.debug)
         self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.debug_messenger, null);
     self.vki.destroyInstance(self.instance, null);
@@ -232,7 +233,7 @@ fn deinitInstance(self: Graphics) void {
 fn initSurface(self: *Graphics) !void {
     self.surface = try sdlvk.createSurface(self.window, self.instance);
 }
-fn deinitSurface(self: Graphics) void {
+fn deinitSurface(self: *const Graphics) void {
     self.vki.destroySurfaceKHR(self.instance, self.surface, null);
 }
 
@@ -248,7 +249,7 @@ fn initDevice(self: *Graphics, validation_available: bool) !void {
     self.device = res.device;
     self.queues = res.queues;
 }
-fn deinitDevice(self: Graphics) void {
+fn deinitDevice(self: *const Graphics) void {
     Device.deinit(self.device, self.vkd);
 }
 
@@ -367,7 +368,7 @@ fn initSwapchain(self: *Graphics) !void {
     try self.swapchain.initFramebuffers(self.vkd, self.device, self.ator);
     errdefer self.swapchain.deinitFramebuffers(self.vkd, self.device, self.ator);
 }
-fn deinitSwapchain(self: Graphics) void {
+fn deinitSwapchain(self: *const Graphics) void {
     self.swapchain.deinitFramebuffers(self.vkd, self.device, self.ator);
     self.swapchain.deinitRenderPass(self.vkd, self.device);
     self.swapchain.deinitImageViews(self.vkd, self.device, self.ator);
@@ -380,10 +381,6 @@ fn initUniformBuffer(self: *Graphics, init_n_ubos: u32) !void {
     const alignment = self.pdev.props.limits.min_uniform_buffer_offset_alignment;
     const size = blk: {
         const ubo_size: vk.DeviceSize = @sizeOf(UniformBufferObject);
-        // const rem = ubo_size % alignment;
-        // var single_size: vk.DeviceSize = ubo_size;
-        // if (rem != 0)
-        //     single_size += alignment - rem;
         const single_size = util.padSize(ubo_size, alignment);
         break :blk init_n_ubos * max_frames_in_flight * single_size;
     };
@@ -409,7 +406,7 @@ fn initUniformBuffer(self: *Graphics, init_n_ubos: u32) !void {
     });
     errdefer self.uniform_buffer.deinit(self.vkd, self.device);
 }
-fn deinitUniformBuffer(self: Graphics) void {
+fn deinitUniformBuffer(self: *const Graphics) void {
     self.uniform_buffer.deinit(self.vkd, self.device);
 }
 
@@ -497,7 +494,7 @@ fn initDescriptorPool(self: *Graphics) !void {
         0, undefined,
     );
 }
-fn deinitDescriptorPool(self: Graphics) void {
+fn deinitDescriptorPool(self: *const Graphics) void {
     const vkd = self.vkd;
     // this frees descriptor sets automatically
     vkd.destroyDescriptorPool(
@@ -623,11 +620,22 @@ fn initPipeline(self: *Graphics) !void {
     };
     self.pipeline.handle = try builder.build(vkd, device, self.swapchain.render_pass);
 }
-fn deinitPipeline(self: Graphics) void {
+fn deinitPipeline(self: *const Graphics) void {
     const vkd = self.vkd;
     const device = self.device;
     vkd.destroyPipeline(device, self.pipeline.handle, null);
     vkd.destroyPipelineLayout(device, self.pipeline.layout, null);
+}
+
+pub fn resize(self: *Graphics) !void {
+    try self.vkd.deviceWaitIdle(self.device);
+    self.deinitPipeline();
+    self.deinitSwapchain();
+
+    try self.initSwapchain();
+    errdefer self.deinitSwapchain();
+    try self.initPipeline();
+    errdefer self.deinitPipeline();
 }
 
 fn initCommandPools(self: *Graphics) !void {
@@ -671,7 +679,7 @@ fn initCommandPools(self: *Graphics) !void {
         1, &self.cmd_pools.transfer.buffers,
     );
 }
-fn deinitCommandPools(self: Graphics) void {
+fn deinitCommandPools(self: *const Graphics) void {
     const vkd = self.vkd;
     const device = self.device;
     vkd.freeCommandBuffers(
@@ -702,7 +710,7 @@ fn initStagerFinalBufferPair(
     });
     errdefer self.stager_final.deinit(self.vkd, self.device);
 }
-fn deinitStagerFinalBufferPair(self: Graphics) void {
+fn deinitStagerFinalBufferPair(self: *const Graphics) void {
     self.stager_final.deinit(self.vkd, self.device);
 }
 
@@ -731,7 +739,7 @@ fn initSyncObjects(self: *Graphics) !void {
         errdefer vkd.destroyFence(device, self.fence[init_count], null);
     }
 }
-fn deinitSyncObjects(self: Graphics) void {
+fn deinitSyncObjects(self: *const Graphics) void {
     const vkd = self.vkd;
     const device = self.device;
     for (0..max_frames_in_flight) |i| {
@@ -767,7 +775,7 @@ pub const PhysicalDevice = struct {
                 self.count += 1;
                 return true;
             }
-            // *const is necessary to avoid poitential copying
+            // *const is necessary to avoid potential copying
             // which invalidates returned memory
             pub fn slice(self: *const UniqueIndices) []const u32 {
                 return self.indices[0..self.count];
@@ -1310,8 +1318,9 @@ pub const Buffer = struct {
             self.stager.deinit(vkd, device);
         }
 
+        /// presumably deprecated
         fn stageBytes(
-            self: StagerFinalPair,
+            self: *const StagerFinalPair,
             offset: vk.DeviceSize,
             bytes: []const u8,
             vkd: vk.DeviceDispatch,
@@ -1331,16 +1340,52 @@ pub const Buffer = struct {
             defer vkd.unmapMemory(device, self.stager.memory);
             const data = @ptrCast([*]u8, _data.?);
             @memcpy(data, bytes);
-            try vkd.flushMappedMemoryRanges(device,
-                range.len, &range,
-            );
+            // no need to flush host-coherent memory
         }
         pub const TransferInfo = struct {
             reset_transfer_buffer: bool = true,
             transfer_queue_wait_idle: bool = false,
         };
+        fn stageDrawableState(
+            self: *const StagerFinalPair,
+            offset: vk.DeviceSize,
+            state: DrawableState,
+            vkd: vk.DeviceDispatch,
+            device: vk.Device,
+        ) !bool {
+            var n_vertices: u32 = 0;
+            var n_indices: u32 = 0;
+            var mem_size: vk.DeviceSize = undefined;
+            { // check capacity
+                // TODO alignment concerns for general case
+                for (state.infos) |info| {
+                    n_vertices += info.n_vertices;
+                    n_indices += info.n_indices;
+                }
+                const vertex_region: vk.DeviceSize = @sizeOf(Vertex) * n_vertices;
+                const index_region: vk.DeviceSize = @sizeOf(Index) * n_indices;
+                mem_size = vertex_region + index_region;
+                if (mem_size > self.stager.size) {
+                    return false;
+                }
+            }
+            const range = [_]vk.MappedMemoryRange{.{
+                .memory = self.stager.memory,
+                .offset = offset,
+                .size = mem_size,
+            }};
+            const _data = try vkd.mapMemory(device,
+                range[0].memory, range[0].offset, range[0].size,
+                .{},  // flags
+            );
+            defer vkd.unmapMemory(device, self.stager.memory);
+            const data = @ptrCast([*]u8, _data.?)[range[0].offset..range[0].size];
+            try state.writeAsBytes(.{.n_vertices=n_vertices, .n_indices=n_indices}, data);
+            // no need to flash host-coherent memory
+            return true;
+        }
         fn transfer(
-            self: StagerFinalPair,
+            self: *const StagerFinalPair,
             vkd: vk.DeviceDispatch,
             transfer_buffer: vk.CommandBuffer,
             transfer_queue: vk.Queue,
@@ -1350,6 +1395,7 @@ pub const Buffer = struct {
                 .src_offset = 0, .dst_offset = 0,
                 .size = self.final.size,
             }};
+            try vkd.queueWaitIdle(transfer_queue);
             if (info.reset_transfer_buffer)
                 try vkd.resetCommandBuffer(transfer_buffer, .{});
             // record command buffer
@@ -1373,7 +1419,7 @@ pub const Buffer = struct {
                 .p_wait_dst_stage_mask = undefined,
                 .command_buffer_count = 1,
                 .p_command_buffers = @ptrCast([*]const vk.CommandBuffer,
-                    transfer_buffer),
+                    &transfer_buffer),
                 .signal_semaphore_count = 0,
                 .p_signal_semaphores = null,
             }};
@@ -1402,12 +1448,6 @@ pub const UniformBufferObject = struct {
     proj:  [16]f32 align(16) = eye4,
 
     pub fn alignAddress(count: u32, alignment: vk.DeviceSize) vk.DeviceSize {
-        // const ubo_size = @sizeOf(UniformBufferObject);
-        // const rem = ubo_size % alignment;
-        // var single_size: vk.DeviceSize = ubo_size;
-        // if (rem != 0)
-        //     single_size += alignment - rem;
-        // return count * single_size;
         return util.padSize(
             @intCast(vk.DeviceSize, count * @sizeOf(UniformBufferObject)), alignment,
         );
@@ -1466,12 +1506,91 @@ pub fn CommandPool(comptime _n_buffers: comptime_int) type {
     };
 }
 
-pub const PrimitiveObjectInfo = struct {
+pub const PrimitiveObject = struct {
+    vertices: []Vertex,
+    indices: []Index,
+
+    pub fn nVertices(self: PrimitiveObject) u32 {
+        return @intCast(u32, self.vertices.len);
+    }
+    pub fn nIndices(self: PrimitiveObject) u32 {
+        return @intCast(u32, self.indices.len);
+    }
+};
+pub const PrimitiveCollection = std.SinglyLinkedList(PrimitiveObject);
+pub const DrawableInfo = struct {
     n_vertices: u32 = 0,
     n_indices: u32 = 0,
 };
+/// accumulates drawable infos
+pub const DrawableCapacityInfo = DrawableInfo;
+pub const DrawableState = struct {
+    lists: [n_drawable_layers]PrimitiveCollection = [_]PrimitiveCollection{.{}} ** n_drawable_layers,
+    infos: [n_drawable_layers]DrawableInfo = [_]DrawableInfo{.{}} ** n_drawable_layers,
 
-// pub const PrimitiveCollection = std.SinglyLinkedList(PrimitiveObject);
+    fn updateInfos(self: *DrawableState) DrawableCapacityInfo {
+        var info = DrawableCapacityInfo{};
+        for (&self.infos, 0..) |*di, i| {
+            di.n_vertices = 0;
+            di.n_indices = 0;
+            var node = self.lists[i].first;
+            while (node) |n| : (node = n.next) {
+                di.n_vertices += n.data.nVertices();
+                di.n_indices += n.data.nIndices();
+            }
+            info.n_vertices += di.n_vertices;
+            info.n_indices += di.n_indices;
+        }
+        return info;
+    }
+    fn writeAsBytes(
+        self: *const DrawableState, info: DrawableCapacityInfo,
+        dst: []u8,
+    ) !void {
+        { // ensure capacity
+            // TODO alignment concerns for general case
+            const n_vertices = info.n_vertices;
+            const n_indices = info.n_indices;
+            const vertex_region: u32 = @sizeOf(Vertex) * n_vertices;
+            const index_region: u32 = @sizeOf(Index) * n_indices;
+            const mem_size = vertex_region + index_region;
+            if (mem_size > dst.len) {
+                return error.Overflow;
+            }
+        }
+        // update bytes
+        var vertex_offset: u32 = 0;
+        var index_offset: u32 = info.n_vertices * @sizeOf(Vertex);
+        var per_list_vertex_offset = [_]u32{0} ** n_drawable_layers;
+        for (self.lists, 0..) |list, i| {
+            var node = list.first;
+            var vertex_region: u32 = undefined;
+            var index_region: u32 = undefined;
+            while (node) |n| : ({
+                node = n.next;
+                vertex_offset += vertex_region;
+                index_offset += index_region;
+                per_list_vertex_offset[i] += vertex_region;
+            }) {
+                vertex_region = @intCast(u32, n.data.vertices.len * @sizeOf(Vertex));
+                index_region = @intCast(u32, n.data.indices.len * @sizeOf(Index));
+                @memcpy(
+                    dst[vertex_offset..vertex_offset+vertex_region],
+                    std.mem.sliceAsBytes(n.data.vertices),
+                );
+                @memcpy(
+                    dst[index_offset..index_offset+index_region],
+                    std.mem.sliceAsBytes(n.data.indices),
+                );
+                const written_index_slice =
+                    std.mem.bytesAsSlice(Index, dst[index_offset..index_offset+index_region]);
+                for (written_index_slice) |*di| {
+                    di.* += @intCast(Index, per_list_vertex_offset[i]/@sizeOf(Vertex));
+                }
+            }
+        }
+    }
+};
 
 pub fn beginFrame(self: *Graphics, timeout: u64) !?u32 {
     const vkd = self.vkd;
@@ -1495,9 +1614,14 @@ pub fn beginFrame(self: *Graphics, timeout: u64) !?u32 {
         .success => {},
         .timeout => return null,
         .not_ready => return null,  // TODO error?
-        .suboptimal_khr => {},  // TODO resize
+        .suboptimal_khr => {
+            self.resize_requested = true;
+        },
         else => unreachable,
     }
+
+    if (self.resize_requested)
+        try self.resize();
 
     return nxt_img_res.image_index;
 }
@@ -1538,7 +1662,7 @@ pub fn renderFrame(self: *Graphics, image_index: u32) !void {
                 &[_]vk.DeviceSize{0}, // offsets
             );
             var n_vertices: u32 = 0;
-            for (self.drawable_infos) |di|
+            for (self.drawable_state.infos) |di|
                 n_vertices += di.n_vertices;
             const offset = util.padSize(n_vertices * @sizeOf(Vertex), @as(u32, @alignOf(Index)));
             vkd.cmdBindIndexBuffer(cmd_buffer,
@@ -1548,7 +1672,7 @@ pub fn renderFrame(self: *Graphics, image_index: u32) !void {
             );
             var first_index: u32 = 0;
             var vertex_offset: i32 = 0;
-            for (self.drawable_infos) |drawable_info| {
+            for (self.drawable_state.infos) |drawable_info| {
                 vkd.cmdBindDescriptorSets(cmd_buffer,
                     .graphics, self.pipeline.layout,
                     0, // first set
@@ -1557,6 +1681,7 @@ pub fn renderFrame(self: *Graphics, image_index: u32) !void {
                     1, // dynamic offset count TODO
                     &[_]u32{0},
                 );
+                // cmdDrawIndexedIndirect for background
                 vkd.cmdDrawIndexed(cmd_buffer,
                     drawable_info.n_indices,
                     1, // instance count
@@ -1606,7 +1731,9 @@ pub fn renderFrame(self: *Graphics, image_index: u32) !void {
     const present_res = try vkd.queuePresentKHR(self.queues.present, &present_info);
     switch (present_res) {
         .success => {},
-        .suboptimal_khr => {}, // TODO resize
+        .suboptimal_khr => {
+            self.resize_requested = false;
+        },
         else => unreachable,
     }
     
@@ -1614,4 +1741,26 @@ pub fn renderFrame(self: *Graphics, image_index: u32) !void {
     self.frame_counter %= max_frames_in_flight;
 }
 
+pub fn updateDrawableStateInfo(self: *Graphics) DrawableCapacityInfo {
+    return self.drawable_state.updateInfos();
+}
+pub fn updateVertexIndexBuffer(self: *Graphics, info: DrawableCapacityInfo) !void {
+    const vkd = self.vkd;
+    const device = self.device;
+    // try self.stager_final.stageBytes(0, self.drawable_state.bytes, vkd, device);
+    const enough_memory = try self.stager_final.stageDrawableState(
+        0, self.drawable_state, vkd, device,
+    );
+    if (!enough_memory) {
+        const trash_marked_bp = self.stager_final;
+        errdefer self.stager_final = trash_marked_bp;
+        try self.initStagerFinalBufferPair(info.n_vertices, info.n_indices);
+        const enough = try self.stager_final.stageDrawableState(
+            0, self.drawable_state, vkd, device,
+        );
+        if (!enough) unreachable;
+        trash_marked_bp.deinit(vkd, device);
+    }
+    try self.stager_final.transfer(vkd, self.cmd_pools.transfer.buffers[0], self.queues.transfer, .{});
+}
 
