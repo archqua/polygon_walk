@@ -26,6 +26,8 @@ pub const Margins = struct {
 };
 
 pub const Button = struct {
+    pub const Callback = *const fn(data: usize) anyerror!void;
+
     bg_color_idle: Color.RGBAf,
     bg_color_focus: ?Color.RGBAf = null,
     txt_color_idle: Color.RGBAf = Color.RGBAf.black,
@@ -35,6 +37,7 @@ pub const Button = struct {
     _height: ?f32 = null,
     text_scale: f32 = 1.0,
     margins: Margins = .{},
+    callback: ?Callback = null,
 
     pub fn naturalWidth(self: Button) f32 {
         const scale = text.Scale{.y = self.text_scale, .flipy=true};
@@ -209,6 +212,54 @@ pub const Menu = struct {
         }
         return null;
     }
+
+    pub const HandlerInfo = struct {
+        menu: *Menu,
+        alignment: Alignment,
+        offset: Offset,
+        window_width: usize,
+        window_height: usize,
+        button_data: usize = 0,
+    };
+
+    pub const handler: EventHandler = .{
+        .mouseMotionCb = struct {
+            fn fun(m_motion: sdl.MouseMotionEvent, data: usize) !void {
+                const info = @intToPtr(*const HandlerInfo, data);
+                const half_width = 0.5 * @intToFloat(f32, info.window_width);
+                const half_height = 0.5 * @intToFloat(f32, info.window_height);
+                const aspect = half_width / half_height;
+                const cur_x: f32 = aspect * (@intToFloat(f32, m_motion.x) - half_width) / half_width;
+                const cur_y: f32 = (@intToFloat(f32, m_motion.y) - half_height) / half_height;
+                if (info.menu.findButton(info.alignment, info.offset, cur_x, cur_y)) |btn_idx| {
+                    if (btn_idx != info.menu.active_button) {
+                        info.menu.active_button = btn_idx;
+                        std.debug.print("button \"{s}\" focus\n", .{info.menu.buttons[btn_idx].text});
+                    }
+                }
+            }
+        }.fun,
+        .mouseButtonDownCb = struct {
+            fn fun(m_down: sdl.MouseButtonEvent, data: usize) !void {
+                const info = @intToPtr(*const HandlerInfo, data);
+                const half_width = 0.5 * @intToFloat(f32, info.window_width);
+                const half_height = 0.5 * @intToFloat(f32, info.window_height);
+                const aspect = half_width / half_height;
+                const cur_x: f32 = aspect * (@intToFloat(f32, m_down.x) - half_width) / half_width;
+                const cur_y: f32 = (@intToFloat(f32, m_down.y) - half_height) / half_height;
+                if (info.menu.findButton(info.alignment, info.offset, cur_x, cur_y)) |btn_idx| {
+                    if (btn_idx == info.menu.active_button) {
+                        std.debug.print("button \"{s}\" press\n", .{info.menu.buttons[btn_idx].text});
+                        if (info.menu.buttons[btn_idx].callback) |cb| {
+                            try cb(info.button_data);
+                        }
+                    } else {
+                        info.menu.active_button = @intCast(u32, btn_idx);
+                    }
+                }
+            }
+        }.fun,
+    };
 };
 
 pub const EventHandler = struct {
