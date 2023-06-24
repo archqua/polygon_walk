@@ -8,3 +8,15 @@
 - when enemie's number of vertices is less than 0, it is dead
 - another type of enemies is invincible circles, need to come up with ideas for those
 - probably need to change some parameters of environment generation as player walks around so that would feel like location change
+
+## Dependencies
+SDL2 and Vulkan drivers.
+
+## Build and run
+`zig build -Doptimize=ReleaseFast`
+
+Omit `-Doptimize=ReleaseFast` for debug.
+
+`zig build run -Doptimize=ReleaseFast` to build and run.
+
+`./zig-out/bin/polygon_walk` to run after build.
