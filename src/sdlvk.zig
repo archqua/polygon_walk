@@ -11,6 +11,8 @@ const Allocator = std.mem.Allocator;
 
 /// SDL.zig doesn't provide vulkan compatibility with sdl
 
+pub const quit_event_code: i32 = -1;
+
 pub fn createSurface(
     window: sdl.Window,
     instance: vk.Instance,

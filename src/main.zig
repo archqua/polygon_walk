@@ -22,7 +22,6 @@ const ui_bg_index = 3;
 const ui_obj_index = 4;
 const ui_fg_index = 5;
 
-const quit_event_code: i32 = -1;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -43,6 +42,7 @@ pub fn main() !void {
     var menu = UI.Menu{
         .buttons = try ator.alloc(UI.Button, 3),
         .interval = 0.1,
+        .active_button = undefined,
     };
     defer ator.free(menu.buttons);
     menu.buttons[0] = UI.Button{
@@ -60,6 +60,7 @@ pub fn main() !void {
         .text = "settings",
         .text_scale = 0.15,
         .margins = .{.top = 0.4, .left = 0.64},
+        // .force_inactive = true,
     };
     menu.buttons[2] = UI.Button{
         .bg_color_idle = util.Color.RGBAf{.r = 0.6, .g = 0.0, .b = 0.0},
@@ -69,14 +70,15 @@ pub fn main() !void {
         .text_scale = 0.15,
         .margins = .{.top = 0.4, .left = 0.64},
         .callback = struct {
-            fn fun(data: usize) !void {
+            fn fun(data: ?*anyopaque) !void {
                 _  = data;
                 // this is not super fair, but since this basically quits, we can do so
                 const ev_type = try sdl.registerEvents(1);
-                try sdl.pushEvent(ev_type, quit_event_code, null, null);
+                try sdl.pushEvent(ev_type, sdlvk.quit_event_code, null, null);
             }
         }.fun,
     };
+    _ = menu.focusButton(0);
     var drawables = try menu.drawables(.center, .{.x = 0.0, .y = -0.7}, ator);
     defer {
         for (&drawables) |*l| {
@@ -109,11 +111,13 @@ pub fn main() !void {
     graphics.vkd.unmapMemory(graphics.device, graphics.uniform_buffer.memory);
 
     var active_button: u32 = menu.active_button;
-    const handler_info = UI.Menu.HandlerInfo{
+    var button_data = [3]?*anyopaque{null, null, null};
+    var handler_info = UI.Menu.HandlerInfo{
         .menu = &menu,
         .alignment = .center,
         .offset = .{.x = 0.0, .y = -0.7},
         .window_width = 1280, .window_height = 720,
+        .button_data = &button_data,
     };
     MAIN_LOOP: while (true) {
         // while (sdl.pollEvent()) |event| {
@@ -121,9 +125,9 @@ pub fn main() !void {
         while (sdl.waitEventTimeout(1)) |event| {
             switch (event) {
                 .quit => break :MAIN_LOOP,
-                .user => |u| if (u.code == quit_event_code) break: MAIN_LOOP,
+                .user => |u| if (u.code == sdlvk.quit_event_code) break: MAIN_LOOP,
                 else => {
-                    _ = try UI.Menu.handler.handle(event, @ptrToInt(&handler_info));
+                    _ = try UI.Menu.handler.handle(event, &handler_info);
                 },
             }
         }

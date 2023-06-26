@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const math = std.math;
 
 const sdl = @import("sdl2");
+const sdlvk = @import("sdlvk.zig");
 
 const Graphics = @import("graphics.zig");
 const text = @import("text.zig");
@@ -26,7 +27,7 @@ pub const Margins = struct {
 };
 
 pub const Button = struct {
-    pub const Callback = *const fn(data: usize) anyerror!void;
+    pub const Callback = *const fn(data: ?*anyopaque) anyerror!void;
 
     bg_color_idle: Color.RGBAf,
     bg_color_focus: ?Color.RGBAf = null,
@@ -38,6 +39,7 @@ pub const Button = struct {
     text_scale: f32 = 1.0,
     margins: Margins = .{},
     callback: ?Callback = null,
+    force_inactive: bool = false,
 
     pub fn naturalWidth(self: Button) f32 {
         const scale = text.Scale{.y = self.text_scale, .flipy=true};
@@ -184,7 +186,7 @@ pub const Menu = struct {
         return res;
     }
 
-    pub fn findButton(
+    pub fn locateButton(
         self: *const Menu,
         alignment: Alignment, offset: Offset,
         x: f32, y: f32,
@@ -212,6 +214,71 @@ pub const Menu = struct {
         }
         return null;
     }
+    pub fn focusButton(self: *Menu, btn_idx: u32) bool {
+        if (self.active_button != btn_idx and
+            btn_idx < self.buttons.len and
+            !self.buttons[btn_idx].force_inactive
+        ) {
+            self.active_button = btn_idx;
+            return true;
+        } else {
+            return false;
+        }
+    }
+    pub fn activeButton(self: *const Menu) ?*const Button {
+        if (self.active_button < self.buttons.len and !self.buttons[self.active_button].force_inactive)
+            return &self.buttons[self.active_button]
+        else
+            return null;
+    }
+    pub fn focusNext(self: *Menu) bool {
+        var candidate = self.active_button +% 1;
+        if (candidate >= self.buttons.len)
+            return false;
+        while (self.buttons[candidate].force_inactive) {
+            candidate +%= 1;
+            if (candidate >= self.buttons.len)
+                return false;
+        }
+        return self.focusButton(candidate);
+    }
+    pub fn focusPrev(self: *Menu) bool {
+        var candidate = self.active_button -% 1;
+        if (candidate >= self.buttons.len)
+            return false;
+        while (self.buttons[candidate].force_inactive) {
+            candidate -%= 1;
+            if (candidate >= self.buttons.len)
+                return false;
+        }
+        return self.focusButton(candidate);
+    }
+    pub fn focusNextWrap(self: *Menu) bool {
+        if (self.buttons.len == 0)
+            return false;
+        var candidate = self.active_button +% 1;
+        if (candidate >= self.buttons.len)
+            candidate %= @intCast(u32, self.buttons.len);
+        while (self.buttons[candidate].force_inactive) {
+            candidate +%= 1;
+            if (candidate >= self.buttons.len)
+                return false;
+        }
+        return self.focusButton(candidate);
+    }
+    pub fn focusPrevWrap(self: *Menu) bool {
+        if (self.buttons.len == 0)
+            return false;
+        var candidate = self.active_button -% 1;
+        if (candidate >= self.buttons.len)
+            candidate = @intCast(u32, self.buttons.len) -% 1;
+        while (self.buttons[candidate].force_inactive) {
+            candidate -%= 1;
+            if (candidate >= self.buttons.len)
+                return false;
+        }
+        return self.focusButton(candidate);
+    }
 
     pub const HandlerInfo = struct {
         menu: *Menu,
@@ -219,43 +286,80 @@ pub const Menu = struct {
         offset: Offset,
         window_width: usize,
         window_height: usize,
-        button_data: usize = 0,
+        button_data: []?*anyopaque,
     };
 
-    pub const handler: EventHandler = .{
+    pub const handler = EventHandler{
         .mouseMotionCb = struct {
-            fn fun(m_motion: sdl.MouseMotionEvent, data: usize) !void {
-                const info = @intToPtr(*const HandlerInfo, data);
+            fn fun(m_motion: sdl.MouseMotionEvent, data: ?*anyopaque) !void {
+                const info = @ptrCast(*HandlerInfo, @alignCast(@alignOf(HandlerInfo), data.?));
                 const half_width = 0.5 * @intToFloat(f32, info.window_width);
                 const half_height = 0.5 * @intToFloat(f32, info.window_height);
                 const aspect = half_width / half_height;
                 const cur_x: f32 = aspect * (@intToFloat(f32, m_motion.x) - half_width) / half_width;
                 const cur_y: f32 = (@intToFloat(f32, m_motion.y) - half_height) / half_height;
-                if (info.menu.findButton(info.alignment, info.offset, cur_x, cur_y)) |btn_idx| {
-                    if (btn_idx != info.menu.active_button) {
-                        info.menu.active_button = btn_idx;
+                if (info.menu.locateButton(info.alignment, info.offset, cur_x, cur_y)) |btn_idx| {
+                    if (info.menu.focusButton(btn_idx))
                         std.debug.print("button \"{s}\" focus\n", .{info.menu.buttons[btn_idx].text});
-                    }
                 }
             }
         }.fun,
         .mouseButtonDownCb = struct {
-            fn fun(m_down: sdl.MouseButtonEvent, data: usize) !void {
-                const info = @intToPtr(*const HandlerInfo, data);
+            fn fun(m_down: sdl.MouseButtonEvent, data: ?*anyopaque) !void {
+                const info = @ptrCast(*HandlerInfo, @alignCast(@alignOf(HandlerInfo), data.?));
                 const half_width = 0.5 * @intToFloat(f32, info.window_width);
                 const half_height = 0.5 * @intToFloat(f32, info.window_height);
                 const aspect = half_width / half_height;
                 const cur_x: f32 = aspect * (@intToFloat(f32, m_down.x) - half_width) / half_width;
                 const cur_y: f32 = (@intToFloat(f32, m_down.y) - half_height) / half_height;
-                if (info.menu.findButton(info.alignment, info.offset, cur_x, cur_y)) |btn_idx| {
+                if (info.menu.locateButton(info.alignment, info.offset, cur_x, cur_y)) |btn_idx| {
                     if (btn_idx == info.menu.active_button) {
                         std.debug.print("button \"{s}\" press\n", .{info.menu.buttons[btn_idx].text});
                         if (info.menu.buttons[btn_idx].callback) |cb| {
-                            try cb(info.button_data);
+                            try cb(info.button_data[btn_idx]);
                         }
                     } else {
-                        info.menu.active_button = @intCast(u32, btn_idx);
+                        if (info.menu.focusButton(btn_idx))
+                            std.debug.print("button \"{s}\" focus\n", .{info.menu.buttons[btn_idx].text});
                     }
+                }
+            }
+        }.fun,
+        .keyDownCb = struct {
+            fn fun(k_down: sdl.KeyboardEvent, data: ?*anyopaque) !void {
+                const info = @ptrCast(*HandlerInfo, @alignCast(@alignOf(HandlerInfo), data.?));
+                switch (k_down.scancode) {
+                    .q => {
+                        if (k_down.modifiers.get(.left_control) or k_down.modifiers.get(.right_control)) {
+                            // this is not super fair, but since this basically quits, we can do so
+                            const ev_type = try sdl.registerEvents(1);
+                            try sdl.pushEvent(ev_type, sdlvk.quit_event_code, null, null);
+                        }
+                    },
+                    .@"return" => {
+                        if (info.menu.activeButton()) |ab| {
+                            if (ab.callback) |cb| {
+                                try cb(info.button_data[info.menu.active_button]);
+                            }
+                        }
+                    },
+                    .j, .down => {
+                        // if (info.menu.focusNext())
+                        if (info.menu.focusNextWrap())
+                            std.debug.print(
+                                "button \"{s}\" focus\n",
+                                .{info.menu.activeButton().?.text},
+                            );
+                    },
+                    .k, .up => {
+                        // if (info.menu.focusPrev())
+                        if (info.menu.focusPrevWrap())
+                            std.debug.print(
+                                "button \"{s}\" focus\n",
+                                .{info.menu.activeButton().?.text},
+                            );
+                    },
+                    else => {},
                 }
             }
         }.fun,
@@ -263,55 +367,55 @@ pub const Menu = struct {
 };
 
 pub const EventHandler = struct {
-    pub const ClipBoardUpdateCallback = *const fn(event: sdl.Event.CommonEvent, data: usize) anyerror!void;
-    pub const AppDidEnterBackgroundCallback = *const fn(event: sdl.Event.CommonEvent, data: usize) anyerror!void;
-    pub const AppDidEnterForegroundCallback = *const fn(event: sdl.Event.CommonEvent, data: usize) anyerror!void;
-    pub const AppWillEnterForegroundCallback = *const fn(event: sdl.Event.CommonEvent, data: usize) anyerror!void;
-    pub const AppWillEnterBackgroundCallback = *const fn(event: sdl.Event.CommonEvent, data: usize) anyerror!void;
-    pub const AppLowMemoryCallback = *const fn(event: sdl.Event.CommonEvent, data: usize) anyerror!void;
-    pub const AppTerminatingCallback = *const fn(event: sdl.Event.CommonEvent, data: usize) anyerror!void;
-    pub const RenderTargetsResetCallback = *const fn(event: sdl.Event.CommonEvent, data: usize) anyerror!void;
-    pub const RenderDeviceResetCallback = *const fn(event: sdl.Event.CommonEvent, data: usize) anyerror!void;
-    pub const KeyMapChangedCallback = *const fn(event: sdl.Event.CommonEvent, data: usize) anyerror!void;
-    pub const DisplayCallback = *const fn(event: sdl.Event.DisplayEvent, data: usize) anyerror!void;
-    pub const WindowCallback = *const fn(event: sdl.WindowEvent, data: usize) anyerror!void;
-    pub const KeyDownCallback = *const fn(event: sdl.KeyboardEvent, data: usize) anyerror!void;
-    pub const KeyUpCallback = *const fn(event: sdl.KeyboardEvent, data: usize) anyerror!void;
-    pub const TextEditingCallback = *const fn(event: sdl.Event.TextEditingEvent, data: usize) anyerror!void;
-    pub const TextInputCallback = *const fn(event: sdl.Event.TextInputEvent, data: usize) anyerror!void;
-    pub const MouseMotionCallback = *const fn(event: sdl.MouseMotionEvent, data: usize) anyerror!void;
-    pub const MouseButtonDownCallback = *const fn(event: sdl.MouseButtonEvent, data: usize) anyerror!void;
-    pub const MouseButtonUpCallback = *const fn(event: sdl.MouseButtonEvent, data: usize) anyerror!void;
-    pub const MouseWheelCallback = *const fn(event: sdl.MouseWheelEvent, data: usize) anyerror!void;
-    pub const JoyAxisMotionCallback = *const fn(event: sdl.JoyAxisEvent, data: usize) anyerror!void;
-    pub const JoyBallMotionCallback = *const fn(event: sdl.JoyBallEvent, data: usize) anyerror!void;
-    pub const JoyHatMotionCallback = *const fn(event: sdl.JoyHatEvent, data: usize) anyerror!void;
-    pub const JoyButtonDownCallback = *const fn(event: sdl.JoyButtonEvent, data: usize) anyerror!void;
-    pub const JoyButtonUpCallback = *const fn(event: sdl.JoyButtonEvent, data: usize) anyerror!void;
-    pub const JoyDeviceAddedCallback = *const fn(event: sdl.Event.JoyDeviceEvent, data: usize) anyerror!void;
-    pub const JoyDeviceRemovedCallback = *const fn(event: sdl.Event.JoyDeviceEvent, data: usize) anyerror!void;
-    pub const ControllerAxisMotionCallback = *const fn(event: sdl.ControllerAxisEvent, data: usize) anyerror!void;
-    pub const ControllerButtonDownCallback = *const fn(event: sdl.ControllerButtonEvent, data: usize) anyerror!void;
-    pub const ControllerButtonUpCallback = *const fn(event: sdl.ControllerButtonEvent, data: usize) anyerror!void;
-    pub const ControllerDeviceAddedCallback = *const fn(event: sdl.Event.ControllerDeviceEvent, data: usize) anyerror!void;
-    pub const ControllerDeviceRemovedCallback = *const fn(event: sdl.Event.ControllerDeviceEvent, data: usize) anyerror!void;
-    pub const ControllerDeviceRemappedCallback = *const fn(event: sdl.Event.ControllerDeviceEvent, data: usize) anyerror!void;
-    pub const AudioDeviceAddedCallback = *const fn(event: sdl.Event.AudioDeviceEvent, data: usize) anyerror!void;
-    pub const AudioDeviceRemovedCallback = *const fn(event: sdl.Event.AudioDeviceEvent, data: usize) anyerror!void;
-    pub const SensorUpdateCallback = *const fn(event: sdl.Event.SensorEvent, data: usize) anyerror!void;
-    pub const QuitCallback = *const fn(event: sdl.Event.QuitEvent, data: usize) anyerror!void;
-    pub const SysWmCallback = *const fn(event: sdl.Event.SysWMEvent, data: usize) anyerror!void;
-    pub const FingerDownCallback = *const fn(event: sdl.Event.TouchFingerEvent, data: usize) anyerror!void;
-    pub const FingerUpCallback = *const fn(event: sdl.Event.TouchFingerEvent, data: usize) anyerror!void;
-    pub const FingerMotionCallback = *const fn(event: sdl.Event.TouchFingerEvent, data: usize) anyerror!void;
-    pub const MultiGestureCallback = *const fn(event: sdl.Event.MultiGestureEvent, data: usize) anyerror!void;
-    pub const DollarGestureCallback = *const fn(event: sdl.Event.DollarGestureEvent, data: usize) anyerror!void;
-    pub const DollarRecordCallback = *const fn(event: sdl.Event.DollarGestureEvent, data: usize) anyerror!void;
-    pub const DropFileCallback = *const fn(event: sdl.Event.DropEvent, data: usize) anyerror!void;
-    pub const DropTextCallback = *const fn(event: sdl.Event.DropEvent, data: usize) anyerror!void;
-    pub const DropBeginCallback = *const fn(event: sdl.Event.DropEvent, data: usize) anyerror!void;
-    pub const DropCompleteCallback = *const fn(event: sdl.Event.DropEvent, data: usize) anyerror!void;
-    pub const UserCallback = *const fn(event: sdl.UserEvent, data: usize) anyerror!void;
+    pub const ClipBoardUpdateCallback = *const fn(event: sdl.Event.CommonEvent, data: ?*anyopaque) anyerror!void;
+    pub const AppDidEnterBackgroundCallback = *const fn(event: sdl.Event.CommonEvent, data: ?*anyopaque) anyerror!void;
+    pub const AppDidEnterForegroundCallback = *const fn(event: sdl.Event.CommonEvent, data: ?*anyopaque) anyerror!void;
+    pub const AppWillEnterForegroundCallback = *const fn(event: sdl.Event.CommonEvent, data: ?*anyopaque) anyerror!void;
+    pub const AppWillEnterBackgroundCallback = *const fn(event: sdl.Event.CommonEvent, data: ?*anyopaque) anyerror!void;
+    pub const AppLowMemoryCallback = *const fn(event: sdl.Event.CommonEvent, data: ?*anyopaque) anyerror!void;
+    pub const AppTerminatingCallback = *const fn(event: sdl.Event.CommonEvent, data: ?*anyopaque) anyerror!void;
+    pub const RenderTargetsResetCallback = *const fn(event: sdl.Event.CommonEvent, data: ?*anyopaque) anyerror!void;
+    pub const RenderDeviceResetCallback = *const fn(event: sdl.Event.CommonEvent, data: ?*anyopaque) anyerror!void;
+    pub const KeyMapChangedCallback = *const fn(event: sdl.Event.CommonEvent, data: ?*anyopaque) anyerror!void;
+    pub const DisplayCallback = *const fn(event: sdl.Event.DisplayEvent, data: ?*anyopaque) anyerror!void;
+    pub const WindowCallback = *const fn(event: sdl.WindowEvent, data: ?*anyopaque) anyerror!void;
+    pub const KeyDownCallback = *const fn(event: sdl.KeyboardEvent, data: ?*anyopaque) anyerror!void;
+    pub const KeyUpCallback = *const fn(event: sdl.KeyboardEvent, data: ?*anyopaque) anyerror!void;
+    pub const TextEditingCallback = *const fn(event: sdl.Event.TextEditingEvent, data: ?*anyopaque) anyerror!void;
+    pub const TextInputCallback = *const fn(event: sdl.Event.TextInputEvent, data: ?*anyopaque) anyerror!void;
+    pub const MouseMotionCallback = *const fn(event: sdl.MouseMotionEvent, data: ?*anyopaque) anyerror!void;
+    pub const MouseButtonDownCallback = *const fn(event: sdl.MouseButtonEvent, data: ?*anyopaque) anyerror!void;
+    pub const MouseButtonUpCallback = *const fn(event: sdl.MouseButtonEvent, data: ?*anyopaque) anyerror!void;
+    pub const MouseWheelCallback = *const fn(event: sdl.MouseWheelEvent, data: ?*anyopaque) anyerror!void;
+    pub const JoyAxisMotionCallback = *const fn(event: sdl.JoyAxisEvent, data: ?*anyopaque) anyerror!void;
+    pub const JoyBallMotionCallback = *const fn(event: sdl.JoyBallEvent, data: ?*anyopaque) anyerror!void;
+    pub const JoyHatMotionCallback = *const fn(event: sdl.JoyHatEvent, data: ?*anyopaque) anyerror!void;
+    pub const JoyButtonDownCallback = *const fn(event: sdl.JoyButtonEvent, data: ?*anyopaque) anyerror!void;
+    pub const JoyButtonUpCallback = *const fn(event: sdl.JoyButtonEvent, data: ?*anyopaque) anyerror!void;
+    pub const JoyDeviceAddedCallback = *const fn(event: sdl.Event.JoyDeviceEvent, data: ?*anyopaque) anyerror!void;
+    pub const JoyDeviceRemovedCallback = *const fn(event: sdl.Event.JoyDeviceEvent, data: ?*anyopaque) anyerror!void;
+    pub const ControllerAxisMotionCallback = *const fn(event: sdl.ControllerAxisEvent, data: ?*anyopaque) anyerror!void;
+    pub const ControllerButtonDownCallback = *const fn(event: sdl.ControllerButtonEvent, data: ?*anyopaque) anyerror!void;
+    pub const ControllerButtonUpCallback = *const fn(event: sdl.ControllerButtonEvent, data: ?*anyopaque) anyerror!void;
+    pub const ControllerDeviceAddedCallback = *const fn(event: sdl.Event.ControllerDeviceEvent, data: ?*anyopaque) anyerror!void;
+    pub const ControllerDeviceRemovedCallback = *const fn(event: sdl.Event.ControllerDeviceEvent, data: ?*anyopaque) anyerror!void;
+    pub const ControllerDeviceRemappedCallback = *const fn(event: sdl.Event.ControllerDeviceEvent, data: ?*anyopaque) anyerror!void;
+    pub const AudioDeviceAddedCallback = *const fn(event: sdl.Event.AudioDeviceEvent, data: ?*anyopaque) anyerror!void;
+    pub const AudioDeviceRemovedCallback = *const fn(event: sdl.Event.AudioDeviceEvent, data: ?*anyopaque) anyerror!void;
+    pub const SensorUpdateCallback = *const fn(event: sdl.Event.SensorEvent, data: ?*anyopaque) anyerror!void;
+    pub const QuitCallback = *const fn(event: sdl.Event.QuitEvent, data: ?*anyopaque) anyerror!void;
+    pub const SysWmCallback = *const fn(event: sdl.Event.SysWMEvent, data: ?*anyopaque) anyerror!void;
+    pub const FingerDownCallback = *const fn(event: sdl.Event.TouchFingerEvent, data: ?*anyopaque) anyerror!void;
+    pub const FingerUpCallback = *const fn(event: sdl.Event.TouchFingerEvent, data: ?*anyopaque) anyerror!void;
+    pub const FingerMotionCallback = *const fn(event: sdl.Event.TouchFingerEvent, data: ?*anyopaque) anyerror!void;
+    pub const MultiGestureCallback = *const fn(event: sdl.Event.MultiGestureEvent, data: ?*anyopaque) anyerror!void;
+    pub const DollarGestureCallback = *const fn(event: sdl.Event.DollarGestureEvent, data: ?*anyopaque) anyerror!void;
+    pub const DollarRecordCallback = *const fn(event: sdl.Event.DollarGestureEvent, data: ?*anyopaque) anyerror!void;
+    pub const DropFileCallback = *const fn(event: sdl.Event.DropEvent, data: ?*anyopaque) anyerror!void;
+    pub const DropTextCallback = *const fn(event: sdl.Event.DropEvent, data: ?*anyopaque) anyerror!void;
+    pub const DropBeginCallback = *const fn(event: sdl.Event.DropEvent, data: ?*anyopaque) anyerror!void;
+    pub const DropCompleteCallback = *const fn(event: sdl.Event.DropEvent, data: ?*anyopaque) anyerror!void;
+    pub const UserCallback = *const fn(event: sdl.UserEvent, data: ?*anyopaque) anyerror!void;
 
     clipBoardUpdateCb: ?ClipBoardUpdateCallback = null,
     appDidEnterBackgroundCb: ?AppDidEnterBackgroundCallback = null,
@@ -364,7 +468,7 @@ pub const EventHandler = struct {
     userCb: ?UserCallback = null,
 
     /// returns `true` if appropriate callback was called
-    pub fn handle(self: EventHandler, event: sdl.Event, data: usize) !bool {
+    pub fn handle(self: EventHandler, event: sdl.Event, data: ?*anyopaque) !bool {
         switch (event) {
             .clip_board_update => |e| if (self.clipBoardUpdateCb) |callback| {
                 try callback(e, data);
