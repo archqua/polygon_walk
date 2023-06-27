@@ -123,7 +123,7 @@ pub const Button = struct {
 
         return .{bg_drawable, s_drawable};
     }
-};
+}; // Button
 
 pub const Menu = struct {
     // TODO add horizontal orientation
@@ -232,6 +232,8 @@ pub const Menu = struct {
             return null;
     }
     pub fn focusNext(self: *Menu) bool {
+        if (self.active_button == ~@as(u32, 0))
+            self.active_button = 0;
         var candidate = self.active_button +% 1;
         if (candidate >= self.buttons.len)
             return false;
@@ -243,6 +245,8 @@ pub const Menu = struct {
         return self.focusButton(candidate);
     }
     pub fn focusPrev(self: *Menu) bool {
+        if (self.active_button == ~@as(u32, 0))
+            self.active_button = @intCast(u32, self.buttons.len) -% 1;
         var candidate = self.active_button -% 1;
         if (candidate >= self.buttons.len)
             return false;
@@ -280,7 +284,7 @@ pub const Menu = struct {
         return self.focusButton(candidate);
     }
 
-    pub const HandlerInfo = struct {
+    pub const HandlerData = struct {
         menu: *Menu,
         alignment: Alignment,
         offset: Offset,
@@ -292,7 +296,7 @@ pub const Menu = struct {
     pub const handler = EventHandler{
         .mouseMotionCb = struct {
             fn fun(m_motion: sdl.MouseMotionEvent, data: ?*anyopaque) !void {
-                const info = @ptrCast(*HandlerInfo, @alignCast(@alignOf(HandlerInfo), data.?));
+                const info = @ptrCast(*HandlerData, @alignCast(@alignOf(HandlerData), data.?));
                 const half_width = 0.5 * @intToFloat(f32, info.window_width);
                 const half_height = 0.5 * @intToFloat(f32, info.window_height);
                 const aspect = half_width / half_height;
@@ -306,7 +310,7 @@ pub const Menu = struct {
         }.fun,
         .mouseButtonDownCb = struct {
             fn fun(m_down: sdl.MouseButtonEvent, data: ?*anyopaque) !void {
-                const info = @ptrCast(*HandlerInfo, @alignCast(@alignOf(HandlerInfo), data.?));
+                const info = @ptrCast(*HandlerData, @alignCast(@alignOf(HandlerData), data.?));
                 const half_width = 0.5 * @intToFloat(f32, info.window_width);
                 const half_height = 0.5 * @intToFloat(f32, info.window_height);
                 const aspect = half_width / half_height;
@@ -327,7 +331,7 @@ pub const Menu = struct {
         }.fun,
         .keyDownCb = struct {
             fn fun(k_down: sdl.KeyboardEvent, data: ?*anyopaque) !void {
-                const info = @ptrCast(*HandlerInfo, @alignCast(@alignOf(HandlerInfo), data.?));
+                const info = @ptrCast(*HandlerData, @alignCast(@alignOf(HandlerData), data.?));
                 switch (k_down.scancode) {
                     .q => {
                         if (k_down.modifiers.get(.left_control) or k_down.modifiers.get(.right_control)) {
@@ -364,7 +368,44 @@ pub const Menu = struct {
             }
         }.fun,
     };
-};
+}; // Menu
+
+pub fn Menus(comptime names: []const []const u8) type {
+    const n_menus = names.len;
+    comptime var fields = [1]std.builtin.Type.StructField{undefined} ** n_menus;
+    for (&fields, names) |*field, name| {
+        field.* = .{
+            .name = name,
+            .type = Menu,
+            .default_value = null,
+            .is_comptime = false,
+            .alignment = @alignOf(Menu),
+        };
+    }
+    return @Type(std.builtin.Type{ .Struct = .{
+        .layout = .Auto,
+        .fields = &fields,
+        .decls = &.{},
+        .is_tuple = false,
+    } });
+}
+pub fn MenusEnum(comptime names: []const []const u8) type {
+    const n_menus = names.len;
+    comptime var fields = [1]std.builtin.Type.EnumField{undefined} ** n_menus;
+    inline for (&fields, names, 0..) |*field, name, i| {
+        field.* = .{
+            .name = name,
+            .value = i,
+        };
+    }
+    return @Type(std.builtin.Type{ .Enum = .{
+        .tag_type = u32,
+        .fields = &fields,
+        .decls = &.{},
+        .is_exhaustive = true,
+    } });
+}
+
 
 pub const EventHandler = struct {
     pub const ClipBoardUpdateCallback = *const fn(event: sdl.Event.CommonEvent, data: ?*anyopaque) anyerror!void;
