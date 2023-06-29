@@ -1369,19 +1369,21 @@ pub const Buffer = struct {
                     return false;
                 }
             }
-            const range = [_]vk.MappedMemoryRange{.{
-                .memory = self.stager.memory,
-                .offset = offset,
-                .size = mem_size,
-            }};
-            const _data = try vkd.mapMemory(device,
-                range[0].memory, range[0].offset, range[0].size,
-                .{},  // flags
-            );
-            defer vkd.unmapMemory(device, self.stager.memory);
-            const data = @ptrCast([*]u8, _data.?)[range[0].offset..range[0].size];
-            try state.writeAsBytes(.{.n_vertices=n_vertices, .n_indices=n_indices}, data);
-            // no need to flash host-coherent memory
+            if (mem_size > 0) {
+                const range = [_]vk.MappedMemoryRange{.{
+                    .memory = self.stager.memory,
+                    .offset = offset,
+                    .size = mem_size,
+                }};
+                const _data = try vkd.mapMemory(device,
+                    range[0].memory, range[0].offset, range[0].size,
+                    .{},  // flags
+                );
+                defer vkd.unmapMemory(device, self.stager.memory);
+                const data = @ptrCast([*]u8, _data.?)[range[0].offset..range[0].size];
+                try state.writeAsBytes(.{.n_vertices=n_vertices, .n_indices=n_indices}, data);
+                // no need to flash host-coherent memory
+            }
             return true;
         }
         fn transfer(

@@ -406,6 +406,176 @@ pub fn MenusEnum(comptime names: []const []const u8) type {
     } });
 }
 
+pub const GameHandlerData = struct {
+    right_magn: f32 = 0.0,
+    fwd_magn:   f32 = 0.0,
+    cur_x: i32 = 0,
+    cur_y: i32 = 0,
+    lmb: bool = false,
+    rmb: bool = false,
+    // TODO wheel
+    extra_data: ?*anyopaque = null,
+};
+pub const game_handler = EventHandler{
+    .mouseMotionCb = struct {
+        fn fun(m_motion: sdl.MouseMotionEvent, data: ?*anyopaque) !void {
+            const info = @ptrCast(*GameHandlerData, @alignCast(@alignOf(GameHandlerData), data.?));
+            info.cur_x = m_motion.x;
+            info.cur_y = m_motion.y;
+        }
+    }.fun,
+    .mouseButtonDownCb = struct {
+        fn fun(m_button: sdl.MouseButtonEvent, data: ?*anyopaque) !void {
+            const info = @ptrCast(*GameHandlerData, @alignCast(@alignOf(GameHandlerData), data.?));
+            switch (m_button.button) {
+                .left => info.lmb = true,
+                .right => info.rmb = true,
+                else => {},
+            }
+        }
+    }.fun,
+    .mouseButtonUpCb = struct {
+        fn fun(m_button: sdl.MouseButtonEvent, data: ?*anyopaque) !void {
+            const info = @ptrCast(*GameHandlerData, @alignCast(@alignOf(GameHandlerData), data.?));
+            switch (m_button.button) {
+                .left => info.lmb = false,
+                .right => info.rmb = false,
+                else => {},
+            }
+        }
+    }.fun,
+    .keyDownCb = struct {
+        fn fun(k_down: sdl.KeyboardEvent, data: ?*anyopaque) !void {
+            const info = @ptrCast(*GameHandlerData, @alignCast(@alignOf(GameHandlerData), data.?));
+            switch (k_down.scancode) {
+                .w, .up => {
+                    if (info.fwd_magn < 0.0)
+                        info.fwd_magn += 1.0
+                    else
+                        info.fwd_magn = 1.0;
+                },
+                .s, .down => {
+                    if (info.fwd_magn > 0.0)
+                        info.fwd_magn -= 1.0
+                    else
+                        info.fwd_magn = -1.0;
+                },
+                .d, .right => {
+                    if (info.right_magn < 0.0)
+                        info.right_magn += 1.0
+                    else
+                        info.right_magn = 1.0;
+                },
+                .a, .left => {
+                    if (info.right_magn > 0.0)
+                        info.right_magn -= 1.0
+                    else
+                        info.right_magn = -1.0;
+                },
+                else => {},
+            }
+        }
+    }.fun,
+    .keyUpCb = struct {
+        fn fun(k_up: sdl.KeyboardEvent, data: ?*anyopaque) !void {
+            const info = @ptrCast(*GameHandlerData, @alignCast(@alignOf(GameHandlerData), data.?));
+            switch (k_up.scancode) {
+                .w, .up => {
+                    if (info.fwd_magn > 0.0)
+                        info.fwd_magn -= 1.0
+                    else
+                        info.fwd_magn = -1.0;
+                },
+                .s, .down => {
+                    if (info.fwd_magn < 0.0)
+                        info.fwd_magn += 1.0
+                    else
+                        info.fwd_magn = 1.0;
+                },
+                .d, .right => {
+                    if (info.right_magn > 0.0)
+                        info.right_magn -= 1.0
+                    else
+                        info.right_magn = -1.0;
+                },
+                .a, .left => {
+                    if (info.right_magn < 0.0)
+                        info.right_magn += 1.0
+                    else
+                        info.right_magn = 1.0;
+                },
+                else => {},
+            }
+        }
+    }.fun,
+};
+pub const no_wasd_game_handler = game_handler.override(.{
+    .keyDownCb = struct {
+        fn fun(k_down: sdl.KeyboardEvent, data: ?*anyopaque) !void {
+            const info = @ptrCast(*GameHandlerData, @alignCast(@alignOf(GameHandlerData), data.?));
+            switch (k_down.scancode) {
+                .up => {
+                    if (info.fwd_magn < 0.0)
+                        info.fwd_magn += 1.0
+                    else
+                        info.fwd_magn = 1.0;
+                },
+                .down => {
+                    if (info.fwd_magn > 0.0)
+                        info.fwd_magn -= 1.0
+                    else
+                        info.fwd_magn = -1.0;
+                },
+                .right => {
+                    if (info.right_magn < 0.0)
+                        info.right_magn += 1.0
+                    else
+                        info.right_magn = 1.0;
+                },
+                .left => {
+                    if (info.right_magn > 0.0)
+                        info.right_magn -= 1.0
+                    else
+                        info.right_magn = -1.0;
+                },
+                else => {},
+            }
+        }
+    }.fun,
+    .keyUpCb = struct {
+        fn fun(k_up: sdl.KeyboardEvent, data: ?*anyopaque) !void {
+            const info = @ptrCast(*GameHandlerData, @alignCast(@alignOf(GameHandlerData), data.?));
+            switch (k_up.scancode) {
+                .up => {
+                    if (info.fwd_magn > 0.0)
+                        info.fwd_magn -= 1.0
+                    else
+                        info.fwd_magn = -1.0;
+                },
+                .down => {
+                    if (info.fwd_magn < 0.0)
+                        info.fwd_magn += 1.0
+                    else
+                        info.fwd_magn = 1.0;
+                },
+                .right => {
+                    if (info.right_magn > 0.0)
+                        info.right_magn -= 1.0
+                    else
+                        info.right_magn = -1.0;
+                },
+                .left => {
+                    if (info.right_magn < 0.0)
+                        info.right_magn += 1.0
+                    else
+                        info.right_magn = 1.0;
+                },
+                else => {},
+            }
+        }
+    }.fun,
+});
+
 
 pub const EventHandler = struct {
     pub const ClipBoardUpdateCallback = *const fn(event: sdl.Event.CommonEvent, data: ?*anyopaque) anyerror!void;
@@ -709,5 +879,13 @@ pub const EventHandler = struct {
             },
         }
         return false;
+    }
+
+    pub fn override(self: EventHandler, comptime callbacks: anytype) EventHandler {
+        var res = self;
+        inline for (@typeInfo(@TypeOf(callbacks)).Struct.fields) |field| {
+            @field(res, field.name) = @field(callbacks, field.name);
+        }
+        return res;
     }
 };
