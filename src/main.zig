@@ -9,6 +9,7 @@ const Graphics = @import("graphics.zig");
 const text = @import("text.zig");
 const util = @import("util");
 const alg = @import("alg.zig");
+const shape = @import("shape.zig");
 
 const UI = @import("ui.zig");
 
@@ -40,11 +41,13 @@ pub fn main() !void {
         @panic("failed to terminate graphics engine");
 
 
+    // set main menu
     var active_menu = &menus.main;
     var active_button: u32 = active_menu.active_button;
     var switched_into_game = false;
 
-    var cur_menu_drawables = try active_menu.drawables(.center, .{.x = 0.0, .y = -0.7}, ator);
+    var cur_menu_drawables =
+        try active_menu.drawables(.center, .{.x = 0.0, .y = -0.7}, ator);
     defer {
         for (&cur_menu_drawables) |*l| {
             while (l.popFirst()) |n| {
@@ -59,7 +62,7 @@ pub fn main() !void {
     var cap_info = graphics.updateDrawableStateInfo();
     try graphics.updateVertexIndexBuffer(cap_info);
 
-    // ubo
+    // basically set static camera
     const ubos = [_]Graphics.UniformBufferObject{
         .{.proj = alg.scaleAxes3(720.0/1280.0, 1.0, 1.0)},
         .{.proj = alg.scaleAxes3(720.0/1280.0, 1.0, 1.0)},
@@ -73,6 +76,7 @@ pub fn main() !void {
     @memcpy(data, std.mem.sliceAsBytes(&ubos));
     // no need to flush coherent memory
     graphics.vkd.unmapMemory(graphics.device, graphics.uniform_buffer.memory);
+
 
     MAIN_LOOP: while (true) {
         // while (sdl.pollEvent()) |event| {
@@ -88,7 +92,8 @@ pub fn main() !void {
         }
         switch (handler_and_data.handler_type) {
             .menu => {
-                const hdata = @ptrCast(*UI.Menu.HandlerData, @alignCast(@alignOf(UI.Menu.HandlerData), handler_and_data.data.?));
+                const hdata = @ptrCast(*UI.Menu.HandlerData,
+                    @alignCast(@alignOf(UI.Menu.HandlerData), handler_and_data.data.?));
                 if (switched_into_game) {
                     active_menu = hdata.menu;
                     active_button = hdata.menu.active_button;
@@ -149,6 +154,7 @@ pub fn main() !void {
     }
 }
 
+
 const menu_names = [_][]const u8{
     "main", "settings", "in_game",
 };
@@ -178,9 +184,9 @@ var handler_and_data = HandlerAndData{
 const menu_handler = UI.Menu.handler;
 var main_menu_buttons = [_]UI.Button{
     .{
-        .bg_color_idle = util.Color.RGBAf{.r = 0.0, .g = 0.6, .b = 0.0},
-        .bg_color_focus = util.Color.RGBAf{.r = 0.1, .g = 1.0, .b = 0.1},
-        .txt_color_idle = util.Color.RGBAf.black,
+        .bg_color_idle = util.color.RGBAf{.r = 0.0, .g = 0.6, .b = 0.0},
+        .bg_color_focus = util.color.RGBAf{.r = 0.1, .g = 1.0, .b = 0.1},
+        .txt_color_idle = util.color.RGBAf.black,
         .text = "play",
         .text_scale = 0.15,
         .margins = .{.top = 0.4, .left = 0.64},
@@ -194,9 +200,9 @@ var main_menu_buttons = [_]UI.Button{
         }.fun,
     },
     .{
-        .bg_color_idle = util.Color.RGBAf{.r = 0.0, .g = 0.5, .b = 0.5},
-        .bg_color_focus = util.Color.RGBAf{.r = 0.1, .g = 0.9, .b = 0.9},
-        .txt_color_idle = util.Color.RGBAf.black,
+        .bg_color_idle = util.color.RGBAf{.r = 0.0, .g = 0.5, .b = 0.5},
+        .bg_color_focus = util.color.RGBAf{.r = 0.1, .g = 0.9, .b = 0.9},
+        .txt_color_idle = util.color.RGBAf.black,
         .text = "settings",
         .text_scale = 0.15,
         .margins = .{.top = 0.4, .left = 0.64},
@@ -208,9 +214,9 @@ var main_menu_buttons = [_]UI.Button{
         }.fun,
     },
     .{
-        .bg_color_idle = util.Color.RGBAf{.r = 0.6, .g = 0.0, .b = 0.0},
-        .bg_color_focus = util.Color.RGBAf{.r = 1.0, .g = 0.1, .b = 0.1},
-        .txt_color_idle = util.Color.RGBAf.black,
+        .bg_color_idle = util.color.RGBAf{.r = 0.6, .g = 0.0, .b = 0.0},
+        .bg_color_focus = util.color.RGBAf{.r = 1.0, .g = 0.1, .b = 0.1},
+        .txt_color_idle = util.color.RGBAf.black,
         .text = "quit",
         .text_scale = 0.15,
         .margins = .{.top = 0.4, .left = 0.64},
@@ -235,18 +241,18 @@ var main_menu_handler_data = UI.Menu.HandlerData{
 
 var settings_menu_buttons = [_]UI.Button{
     .{
-        .bg_color_idle = util.Color.RGBAf{.r = 0.0, .g = 0.5, .b = 0.5},
-        .bg_color_focus = util.Color.RGBAf{.r = 0.1, .g = 0.9, .b = 0.9},
-        .txt_color_idle = util.Color.RGBAf.black,
+        .bg_color_idle = util.color.RGBAf{.r = 0.0, .g = 0.5, .b = 0.5},
+        .bg_color_focus = util.color.RGBAf{.r = 0.1, .g = 0.9, .b = 0.9},
+        .txt_color_idle = util.color.RGBAf.black,
         .text = "not available",
         .text_scale = 0.15,
         .margins = .{.top = 0.4, .left = 0.64},
         .force_inactive = true,
     },
     .{
-        .bg_color_idle = util.Color.RGBAf{.r = 0.5, .g = 0.0, .b = 0.5},
-        .bg_color_focus = util.Color.RGBAf{.r = 0.9, .g = 0.1, .b = 0.9},
-        .txt_color_idle = util.Color.RGBAf.black,
+        .bg_color_idle = util.color.RGBAf{.r = 0.5, .g = 0.0, .b = 0.5},
+        .bg_color_focus = util.color.RGBAf{.r = 0.9, .g = 0.1, .b = 0.9},
+        .txt_color_idle = util.color.RGBAf.black,
         .text = "back",
         .text_scale = 0.15,
         .margins = .{.top = 0.4, .left = 0.64},
@@ -269,9 +275,9 @@ var settings_menu_handler_data = UI.Menu.HandlerData{
 
 var in_game_menu_buttons = [_]UI.Button{
     .{
-        .bg_color_idle = util.Color.RGBAf{.r = 0.5, .g = 0.0, .b = 0.5},
-        .bg_color_focus = util.Color.RGBAf{.r = 0.9, .g = 0.1, .b = 0.9},
-        .txt_color_idle = util.Color.RGBAf.black,
+        .bg_color_idle = util.color.RGBAf{.r = 0.5, .g = 0.0, .b = 0.5},
+        .bg_color_focus = util.color.RGBAf{.r = 0.9, .g = 0.1, .b = 0.9},
+        .txt_color_idle = util.color.RGBAf.black,
         .text = "main menu",
         .text_scale = 0.15,
         .margins = .{.top = 0.4, .left = 0.64},
@@ -283,9 +289,9 @@ var in_game_menu_buttons = [_]UI.Button{
         }.fun,
     },
     .{
-        .bg_color_idle = util.Color.RGBAf{.r = 0.0, .g = 0.6, .b = 0.0},
-        .bg_color_focus = util.Color.RGBAf{.r = 0.1, .g = 1.0, .b = 0.1},
-        .txt_color_idle = util.Color.RGBAf.black,
+        .bg_color_idle = util.color.RGBAf{.r = 0.0, .g = 0.6, .b = 0.0},
+        .bg_color_focus = util.color.RGBAf{.r = 0.1, .g = 1.0, .b = 0.1},
+        .txt_color_idle = util.color.RGBAf.black,
         .text = "back",
         .text_scale = 0.15,
         .margins = .{.top = 0.4, .left = 0.64},
@@ -333,8 +339,10 @@ var game_handler_extra = ExtraGameHandlerData{};
 const game_handler = UI.game_handler.override(.{
     .keyDownCb = struct {
         fn fun(k_down: sdl.KeyboardEvent, data: ?*anyopaque) !void {
-            const info = @ptrCast(*UI.GameHandlerData, @alignCast(@alignOf(UI.GameHandlerData), data.?));
-            const extra_info = @ptrCast(*ExtraGameHandlerData, @alignCast(@alignOf(ExtraGameHandlerData), info.extra_data.?));
+            const info = @ptrCast(*UI.GameHandlerData,
+                @alignCast(@alignOf(UI.GameHandlerData), data.?));
+            const extra_info = @ptrCast(*ExtraGameHandlerData,
+                @alignCast(@alignOf(ExtraGameHandlerData), info.extra_data.?));
             switch (k_down.scancode) {
                 .escape => {
                     extra_info.esc_pressed = true;
@@ -348,11 +356,13 @@ const game_handler = UI.game_handler.override(.{
     }.fun,
     .keyUpCb = struct {
         fn fun(k_up: sdl.KeyboardEvent, data: ?*anyopaque) !void {
-            const info = @ptrCast(*UI.GameHandlerData, @alignCast(@alignOf(UI.GameHandlerData), data.?));
-            const extra_info = @ptrCast(*ExtraGameHandlerData, @alignCast(@alignOf(ExtraGameHandlerData), info.extra_data.?));
+            const info = @ptrCast(*UI.GameHandlerData,
+                @alignCast(@alignOf(UI.GameHandlerData), data.?));
+            const extra_info = @ptrCast(*ExtraGameHandlerData,
+                @alignCast(@alignOf(ExtraGameHandlerData), info.extra_data.?));
             switch (k_up.scancode) {
                 .escape => extra_info.esc_pressed = false,
-                else => return UI.game_handler.keyDownCb.?(k_up, data),
+                else => return UI.game_handler.keyUpCb.?(k_up, data),
             }
         }
     }.fun,

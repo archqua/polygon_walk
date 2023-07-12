@@ -1,4 +1,4 @@
-pub const Color = @import("util/color.zig");
+pub const color = @import("util/color.zig");
 
 pub fn padSize(size: anytype, alignment: anytype) @TypeOf(size) {
     if (size > 0) {

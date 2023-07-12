@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Graphics = @import("graphics.zig");
-const Color = @import("util").Color;
+const color = @import("util").color;
 
 pub const Letter = struct {
     ///
@@ -541,7 +541,7 @@ pub const Offset = struct {
     y: f32 = 0.0,
 };
 pub fn string2drawable(
-    string: String, color: Color.RGBAf,
+    string: String, col: color.RGBAf,
     offset: Offset, scale: Scale,
     ator: Allocator,
 ) !Graphics.PrimitiveObject {
@@ -573,7 +573,7 @@ pub fn string2drawable(
                     offset.x + scalex*l_vertex[0] + @intToFloat(f32, letter_counter)*charwidth,
                     offset.y + scaley*l_vertex[1],
                 },
-                .col = .{color.r, color.g, color.b},
+                .col = .{col.r, col.g, col.b},
             };
             vertex_counter += 1;
         }

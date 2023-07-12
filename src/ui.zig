@@ -7,7 +7,7 @@ const sdlvk = @import("sdlvk.zig");
 
 const Graphics = @import("graphics.zig");
 const text = @import("text.zig");
-const Color = @import("util").Color;
+const color = @import("util").color;
 
 pub const Offset = text.Offset; // struct {
 //     x: f32 = 0.0,
@@ -29,10 +29,10 @@ pub const Margins = struct {
 pub const Button = struct {
     pub const Callback = *const fn(data: ?*anyopaque) anyerror!void;
 
-    bg_color_idle: Color.RGBAf,
-    bg_color_focus: ?Color.RGBAf = null,
-    txt_color_idle: Color.RGBAf = Color.RGBAf.black,
-    txt_color_focus: ?Color.RGBAf = null,
+    bg_color_idle: color.RGBAf,
+    bg_color_focus: ?color.RGBAf = null,
+    txt_color_idle: color.RGBAf = color.RGBAf.black,
+    txt_color_focus: ?color.RGBAf = null,
     text: []const u8,
     _width: ?f32 = null,
     _height: ?f32 = null,
