@@ -42,23 +42,47 @@ pub const Polygon2 = struct {
     vertices: []Point2,
 };
 
-pub const Colorize2Error = error {
-    NotImplemented,
-    bad_shape,
-    bad_target,
-    bad_color,
+pub const Cpy2Error = error {
+    shape_mismatch, polygon_mismatch,
 };
+pub fn cpy2(dst: *Shape2, src: Shape2) Cpy2Error!void {
+    switch (dst.*) {
+        .disk => {
+            switch (src) {
+                .disk => {
+                    dst.* = src;
+                },
+                else => return Cpy2Error.shape_mismatch,
+            }
+        },
+        .triangle => {
+            switch (src) {
+                .triangle => {
+                    dst.* = src;
+                },
+                else => return Cpy2Error.shape_mismatch,
+            }
+        },
+        .polygon => |dp| {
+            switch (src) {
+                .polygon => |sp| {
+                    if (dp.vertices.len != sp.vertices.len)
+                        return Cpy2Error.polygon_mismatch;
+                    for (dp.vertices, sp.vertices) |*dv, sv| {
+                        dv.* = sv;
+                    }
+                },
+                else => return Cpy2Error.shape_mismatch,
+            }
+        },
+    }
+}
 
-pub fn colorize2(
-    shape: Shape2,
-    target_topology: vk.PrimitiveTopology,
-    color: union(enum) {
-        Value: util.color.RGBAf,
-        Array: []const util.color.RGBAf,
-    },
-    ator: Allocator,
-) !Graphics.PrimitiveObject {
-    // allocate
+const VertexIndexCount = struct {
+    n_vertices: i32,
+    n_indices: i32,
+};
+fn getDrawableVertexIndexCount2(shape: Shape2, target_topology: vk.PrimitiveTopology) !VertexIndexCount {
     const n_vertices = switch (shape) {
         .disk => Circle2.n_sectors_approx + 1,
         .triangle => 3,
@@ -88,13 +112,39 @@ pub fn colorize2(
             else => return Colorize2Error.bad_target,
         },
     };
+    return .{
+        .n_vertices = n_vertices,
+        .n_indices  = n_indices,
+    };
+}
+
+pub const Colorize2Error = error {
+    NotImplemented,
+    bad_shape,
+    bad_target,
+    bad_color,
+    drawable_mismatch,
+};
+
+pub const ColorInfo = union(enum) {
+    Value: util.color.RGBAf,
+    Array: []const util.color.RGBAf,
+};
+pub fn colorizeInplace2(
+    shape: Shape2,
+    target_topology: vk.PrimitiveTopology,
+    color: ColorInfo,
+    drawable: Graphics.PrimitiveObject,
+) !void {
+    // check drawable size
+    const vi_count = try getDrawableVertexIndexCount2(shape, target_topology);
+    const n_vertices = vi_count.n_vertices;
+    const n_indices = vi_count.n_indices;
     if (n_indices < 0)
         return Colorize2Error.bad_shape;
-    var res: Graphics.PrimitiveObject = undefined;
-    res.vertices = try ator.alloc(Graphics.Vertex, @intCast(usize, n_vertices));
-    errdefer ator.free(res.vertices);
-    res.indices = try ator.alloc(Graphics.Index, @intCast(usize, n_indices));
-    errdefer ator.free(res.indices);
+    if (@intCast(u32, n_vertices) != drawable.nVertices() or @intCast(u32, n_indices) != drawable.nIndices())
+        return Colorize2Error.drawable_mismatch;
+
     // fill
     switch (color) {
         .Value => |v| {
@@ -102,55 +152,55 @@ pub fn colorize2(
                 .disk => |d| {
                     switch (target_topology) {
                         .triangle_list => {
-                            res.vertices[0].pos = d.center;
-                            res.vertices[0].col = .{v.r, v.g, v.b};
-                            for (res.vertices[1..], 0..) |*vx, i| {
+                            drawable.vertices[0].pos = d.center;
+                            drawable.vertices[0].col = .{v.r, v.g, v.b};
+                            for (drawable.vertices[1..], 0..) |*vx, i| {
                                 vx.pos = .{
                                     d.center[0] + d.radius*cos(
-                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, res.vertices.len-1)
+                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, drawable.vertices.len-1)
                                     ),
                                     d.center[1] + d.radius*sin(
-                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, res.vertices.len-1)
+                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, drawable.vertices.len-1)
                                     ),
                                 };
                                 vx.col = .{v.r, v.g, v.b};
                             }
-                            for (0..res.vertices.len-2) |i| {
-                                res.indices[i*3] = 0;
-                                res.indices[i*3 + 1] = @intCast(Graphics.Index, i+1);
-                                res.indices[i*3 + 2] = @intCast(Graphics.Index, i+2);
+                            for (0..drawable.vertices.len-2) |i| {
+                                drawable.indices[i*3] = 0;
+                                drawable.indices[i*3 + 1] = @intCast(Graphics.Index, i+1);
+                                drawable.indices[i*3 + 2] = @intCast(Graphics.Index, i+2);
                             }
-                            const tail = res.vertices.len-2;
-                            res.indices[tail*3] = 0;
-                            res.indices[tail*3 + 1] = @intCast(Graphics.Index, tail+1);
-                            res.indices[tail*3 + 2] = 1;
+                            const tail = drawable.vertices.len-2;
+                            drawable.indices[tail*3] = 0;
+                            drawable.indices[tail*3 + 1] = @intCast(Graphics.Index, tail+1);
+                            drawable.indices[tail*3 + 2] = 1;
                         },
                         .triangle_strip => return Colorize2Error.NotImplemented,
                         .triangle_fan => {
-                            res.vertices[0].pos = d.center;
-                            res.vertices[0].col = .{v.r, v.g, v.b};
-                            res.indices[0] = 0;
-                            for (res.vertices[1..], 0..) |*vx, i| {
+                            drawable.vertices[0].pos = d.center;
+                            drawable.vertices[0].col = .{v.r, v.g, v.b};
+                            drawable.indices[0] = 0;
+                            for (drawable.vertices[1..], 0..) |*vx, i| {
                                 vx.pos = .{
                                     d.center[0] + d.radius*cos(
-                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, res.vertices.len-1)
+                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, drawable.vertices.len-1)
                                     ),
                                     d.center[1] + d.radius*sin(
-                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, res.vertices.len-1)
+                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, drawable.vertices.len-1)
                                     ),
                                 };
                                 vx.col = .{v.r, v.g, v.b};
-                                res.indices[i] = @intCast(Graphics.Index, i);
+                                drawable.indices[i] = @intCast(Graphics.Index, i);
                             }
                         },
                         else => unreachable,  // checked above
                     }
                 },
                 .triangle => |t| {
-                    for (res.vertices, t, 0..) |*dst, pos, i| {
+                    for (drawable.vertices, t, 0..) |*dst, pos, i| {
                         dst.pos = pos;
                         dst.col = .{v.r, v.g, v.b};
-                        res.indices[i] = @intCast(Graphics.Index, i);
+                        drawable.indices[i] = @intCast(Graphics.Index, i);
                     }
                 },
                 .polygon => |p| {
@@ -158,38 +208,38 @@ pub fn colorize2(
                         .triangle_list => {
                             switch (p.layout) {
                                 .fan => {
-                                    for (res.vertices, p.vertices) |*dst, pos| {
+                                    for (drawable.vertices, p.vertices) |*dst, pos| {
                                         dst.pos = pos;
                                         dst.col = .{v.r, v.g, v.b};
                                     }
-                                    for (0..res.vertices.len-2) |i| {
-                                        res.indices[i*3] = 0;
-                                        res.indices[i*3 + 1] = @intCast(Graphics.Index, i+1);
-                                        res.indices[i*3 + 2] = @intCast(Graphics.Index, i+2);
+                                    for (0..drawable.vertices.len-2) |i| {
+                                        drawable.indices[i*3] = 0;
+                                        drawable.indices[i*3 + 1] = @intCast(Graphics.Index, i+1);
+                                        drawable.indices[i*3 + 2] = @intCast(Graphics.Index, i+2);
                                     }
-                                    const tail = res.vertices.len-2;
-                                    res.indices[tail*3] = 0;
-                                    res.indices[tail*3 + 1] = @intCast(Graphics.Index, tail+1);
-                                    res.indices[tail*3 + 2] = 1;
+                                    const tail = drawable.vertices.len-2;
+                                    drawable.indices[tail*3] = 0;
+                                    drawable.indices[tail*3 + 1] = @intCast(Graphics.Index, tail+1);
+                                    drawable.indices[tail*3 + 2] = 1;
                                 },
                                 .strip => {
-                                    for (res.vertices, p.vertices) |*dst, pos| {
+                                    for (drawable.vertices, p.vertices) |*dst, pos| {
                                         dst.pos = pos;
                                         dst.col = .{v.r, v.g, v.b};
                                     }
-                                    for (0..res.vertices.len-2) |i| {
-                                        res.indices[i*3] = @intCast(Graphics.Index, i);
-                                        res.indices[i*3 + 1] = @intCast(Graphics.Index, i+1);
-                                        res.indices[i*3 + 2] = @intCast(Graphics.Index, i+2);
+                                    for (0..drawable.vertices.len-2) |i| {
+                                        drawable.indices[i*3] = @intCast(Graphics.Index, i);
+                                        drawable.indices[i*3 + 1] = @intCast(Graphics.Index, i+1);
+                                        drawable.indices[i*3 + 2] = @intCast(Graphics.Index, i+2);
                                     }
                                 },
                             }
                         },
                         else => {
-                            for (res.vertices, p.vertices, 0..) |*dst, pos, i| {
+                            for (drawable.vertices, p.vertices, 0..) |*dst, pos, i| {
                                 dst.pos = pos;
                                 dst.col = .{v.r, v.g, v.b};
-                                res.indices[i] = @intCast(Graphics.Index, i);
+                                drawable.indices[i] = @intCast(Graphics.Index, i);
                             }
                         },
                     }
@@ -197,62 +247,62 @@ pub fn colorize2(
             }
         },
         .Array => |a| {
-            if (a.len != res.vertices.len) {
+            if (a.len != drawable.vertices.len) {
                 return Colorize2Error.bad_color;
             }
             switch (shape) {
                 .disk => |d| {
                     switch (target_topology) {
                         .triangle_list => {
-                            res.vertices[0].pos = d.center;
-                            res.vertices[0].col = .{a[0].r, a[0].g, a[0].b};
-                            for (res.vertices[1..], 0..) |*vx, i| {
+                            drawable.vertices[0].pos = d.center;
+                            drawable.vertices[0].col = .{a[0].r, a[0].g, a[0].b};
+                            for (drawable.vertices[1..], 0..) |*vx, i| {
                                 vx.pos = .{
                                     d.center[0] + d.radius*cos(
-                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, res.vertices.len-1)
+                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, drawable.vertices.len-1)
                                     ),
                                     d.center[1] + d.radius*sin(
-                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, res.vertices.len-1)
+                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, drawable.vertices.len-1)
                                     ),
                                 };
                                 vx.col = .{a[i+1].r, a[i+1].g, a[i+1].b};
                             }
-                            for (0..res.vertices.len-2) |i| {
-                                res.indices[i*3] = 0;
-                                res.indices[i*3 + 1] = @intCast(Graphics.Index, i+1);
-                                res.indices[i*3 + 2] = @intCast(Graphics.Index, i+2);
+                            for (0..drawable.vertices.len-2) |i| {
+                                drawable.indices[i*3] = 0;
+                                drawable.indices[i*3 + 1] = @intCast(Graphics.Index, i+1);
+                                drawable.indices[i*3 + 2] = @intCast(Graphics.Index, i+2);
                             }
-                            const tail = res.vertices.len-2;
-                            res.indices[tail*3] = 0;
-                            res.indices[tail*3 + 1] = @intCast(Graphics.Index, tail+1);
-                            res.indices[tail*3 + 2] = 1;
+                            const tail = drawable.vertices.len-2;
+                            drawable.indices[tail*3] = 0;
+                            drawable.indices[tail*3 + 1] = @intCast(Graphics.Index, tail+1);
+                            drawable.indices[tail*3 + 2] = 1;
                         },
                         .triangle_strip => return Colorize2Error.NotImplemented,
                         .triangle_fan => {
-                            res.vertices[0].pos = d.center;
-                            res.vertices[0].col = .{a[0].r, a[0].g, a[0].b};
-                            res.indices[0] = 0;
-                            for (res.vertices[1..], 0..) |*vx, i| {
+                            drawable.vertices[0].pos = d.center;
+                            drawable.vertices[0].col = .{a[0].r, a[0].g, a[0].b};
+                            drawable.indices[0] = 0;
+                            for (drawable.vertices[1..], 0..) |*vx, i| {
                                 vx.pos = .{
                                     d.center[0] + d.radius*cos(
-                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, res.vertices.len-1)
+                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, drawable.vertices.len-1)
                                     ),
                                     d.center[1] + d.radius*sin(
-                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, res.vertices.len-1)
+                                        2.0 * pi * @intToFloat(f32, i) / @intToFloat(f32, drawable.vertices.len-1)
                                     ),
                                 };
                                 vx.col = .{a[i+1].r, a[i+1].g, a[i+1].b};
-                                res.indices[i] = @intCast(Graphics.Index, i);
+                                drawable.indices[i] = @intCast(Graphics.Index, i);
                             }
                         },
                         else => unreachable,  // checked above
                     }
                 },
                 .triangle => |t| {
-                    for (res.vertices, t, a, 0..) |*dst, pos, col, i| {
+                    for (drawable.vertices, t, a, 0..) |*dst, pos, col, i| {
                         dst.pos = pos;
                         dst.col = .{col.r, col.g, col.b};
-                        res.indices[i] = @intCast(Graphics.Index, i);
+                        drawable.indices[i] = @intCast(Graphics.Index, i);
                     }
                 },
                 .polygon => |p| {
@@ -260,38 +310,38 @@ pub fn colorize2(
                         .triangle_list => {
                             switch (p.layout) {
                                 .fan => {
-                                    for (res.vertices, p.vertices, a) |*dst, pos, col| {
+                                    for (drawable.vertices, p.vertices, a) |*dst, pos, col| {
                                         dst.pos = pos;
                                         dst.col = .{col.r, col.g, col.b};
                                     }
-                                    for (0..res.vertices.len-2) |i| {
-                                        res.indices[i*3] = 0;
-                                        res.indices[i*3 + 1] = @intCast(Graphics.Index, i+1);
-                                        res.indices[i*3 + 2] = @intCast(Graphics.Index, i+2);
+                                    for (0..drawable.vertices.len-2) |i| {
+                                        drawable.indices[i*3] = 0;
+                                        drawable.indices[i*3 + 1] = @intCast(Graphics.Index, i+1);
+                                        drawable.indices[i*3 + 2] = @intCast(Graphics.Index, i+2);
                                     }
-                                    const tail = res.vertices.len-2;
-                                    res.indices[tail*3] = 0;
-                                    res.indices[tail*3 + 1] = @intCast(Graphics.Index, tail+1);
-                                    res.indices[tail*3 + 2] = 1;
+                                    const tail = drawable.vertices.len-2;
+                                    drawable.indices[tail*3] = 0;
+                                    drawable.indices[tail*3 + 1] = @intCast(Graphics.Index, tail+1);
+                                    drawable.indices[tail*3 + 2] = 1;
                                 },
                                 .strip => {
-                                    for (res.vertices, p.vertices, a) |*dst, pos, col| {
+                                    for (drawable.vertices, p.vertices, a) |*dst, pos, col| {
                                         dst.pos = pos;
                                         dst.col = .{col.r, col.g, col.b};
                                     }
-                                    for (0..res.vertices.len-2) |i| {
-                                        res.indices[i*3] = @intCast(Graphics.Index, i);
-                                        res.indices[i*3 + 1] = @intCast(Graphics.Index, i+1);
-                                        res.indices[i*3 + 2] = @intCast(Graphics.Index, i+2);
+                                    for (0..drawable.vertices.len-2) |i| {
+                                        drawable.indices[i*3] = @intCast(Graphics.Index, i);
+                                        drawable.indices[i*3 + 1] = @intCast(Graphics.Index, i+1);
+                                        drawable.indices[i*3 + 2] = @intCast(Graphics.Index, i+2);
                                     }
                                 },
                             }
                         },
                         else => {
-                            for (res.vertices, p.vertices, a, 0..) |*dst, pos, col, i| {
+                            for (drawable.vertices, p.vertices, a, 0..) |*dst, pos, col, i| {
                                 dst.pos = pos;
                                 dst.col = .{col.r, col.g, col.b};
-                                res.indices[i] = @intCast(Graphics.Index, i);
+                                drawable.indices[i] = @intCast(Graphics.Index, i);
                             }
                         },
                     }
@@ -299,6 +349,118 @@ pub fn colorize2(
             }
         },
     }
+}
+pub fn colorize2(
+    shape: Shape2,
+    target_topology: vk.PrimitiveTopology,
+    color: ColorInfo,
+    ator: Allocator,
+) !Graphics.PrimitiveObject {
+    // allocate
+    const vi_count = try getDrawableVertexIndexCount2(shape, target_topology);
+    const n_vertices = vi_count.n_vertices;
+    const n_indices = vi_count.n_indices;
+    if (n_indices < 0)
+        return Colorize2Error.bad_shape;
+    var res: Graphics.PrimitiveObject = undefined;
+    res.vertices = try ator.alloc(Graphics.Vertex, @intCast(usize, n_vertices));
+    errdefer ator.free(res.vertices);
+    res.indices = try ator.alloc(Graphics.Index, @intCast(usize, n_indices));
+    errdefer ator.free(res.indices);
 
+    // fill
+    try colorizeInplace2(shape, target_topology, color, res);
     return res;
 } // colorize2()
+
+pub const TransformType2 = enum {
+    translation,
+    rotation,
+    scaling,
+};
+pub const Transform2 = union(TransformType2) {
+    translation: Translation2,
+    rotation: Rotation2,
+    scaling: Scaling2,
+};
+pub const Translation2 = alg.Vec2;
+pub const Rotation2 = f32;
+pub const Scaling2 = alg.Vec2;
+
+pub fn inverse2(fwd: Transform2) Transform2 {
+    return switch (fwd) {
+        .translation => |t| .{ .translation = alg.scale(t, -1.0) },
+        .rotation => |r| .{ .rotation = -r },
+        .scaling => |s| .{ .scaling = .{ 1.0 / s[0], 1.0 / s[1] } },
+    };
+}
+pub const TransformError2 = error {
+    non_uniform_disk_scaling,
+};
+pub fn apply2(transform: Transform2, shape: *Shape2) TransformError2!void {
+    switch (transform) {
+        .translation => |t| {
+            switch (shape.*) {
+                .disk => |*d| {
+                    alg.addInplace(&d.center, t);
+                },
+                .triangle => |*tri| {
+                    for (tri) |*dst| {
+                        alg.addInplace(dst, t);
+                    }
+                },
+                .polygon => |p| {
+                    for (p.vertices) |*dst| {
+                        alg.addInplace(dst, t);
+                    }
+                },
+            }
+        },
+        .rotation => |r| {
+            switch (shape.*) {
+                .disk => {},
+                .triangle => |*tri| {
+                    const s = @sin(r);
+                    const c = @cos(r);
+                    // std.debug.print("rotating triangle for {}\n", .{r});
+                    for (tri) |*point| {
+                        // is this UB?
+                        // point.* = .{ c*point[0] + s*point[1], -s*point[0] + c*point[1] };
+                        const x = point.*;
+                        point.* = .{c*x[0] + s*x[1], -s*x[0] + c*x[1]};
+                    }
+                },
+                .polygon => |p| {
+                    const s = @sin(r);
+                    const c = @cos(r);
+                    for (p.vertices) |*point| {
+                        point.* = .{ c*point[0] + s*point[1], -s*point[0] + c*point[1] };
+                    }
+                },
+            }
+        },
+        .scaling => |s| {
+            switch (shape.*) {
+                .disk => |*d| {
+                    if (@fabs(s[0] - s[1]) > 1e-04) {
+                        return TransformError2.non_uniform_disk_scaling;
+                    }
+                    alg.scaleInplace(&d.center, s[0]);
+                    d.radius *= s[0];
+                },
+                .triangle => |*tri| {
+                    for (tri) |*point| {
+                        point[0] *= s[0];
+                        point[1] *= s[1];
+                    }
+                },
+                .polygon => |p| {
+                    for (p.vertices) |*point| {
+                        point[0] *= s[0];
+                        point[1] *= s[1];
+                    }
+                },
+            }
+        },
+    }
+}

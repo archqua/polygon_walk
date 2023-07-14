@@ -333,13 +333,13 @@ pub const Menu = struct {
             fn fun(k_down: sdl.KeyboardEvent, data: ?*anyopaque) !void {
                 const info = @ptrCast(*HandlerData, @alignCast(@alignOf(HandlerData), data.?));
                 switch (k_down.scancode) {
-                    .q => {
-                        if (k_down.modifiers.get(.left_control) or k_down.modifiers.get(.right_control)) {
-                            // this is not super fair, but since this basically quits, we can do so
-                            const ev_type = try sdl.registerEvents(1);
-                            try sdl.pushEvent(ev_type, sdlvk.quit_event_code, null, null);
-                        }
-                    },
+                    // .q => {
+                    //     if (k_down.modifiers.get(.left_control) or k_down.modifiers.get(.right_control)) {
+                    //         // this is not super fair, but since this basically quits, we can do so
+                    //         const ev_type = try sdl.registerEvents(1);
+                    //         try sdl.pushEvent(ev_type, sdlvk.quit_event_code, null, null);
+                    //     }
+                    // },
                     .@"return" => {
                         if (info.menu.activeButton()) |ab| {
                             if (ab.callback) |cb| {
@@ -368,6 +368,23 @@ pub const Menu = struct {
             }
         }.fun,
     };
+    pub const handler_qexit = handler.override(.{
+        .keyDownCb = struct {
+            fn fun(k_down: sdl.KeyboardEvent, data: ?*anyopaque) !void {
+                // const info = @ptrCast(*HandlerData, @alignCast(@alignOf(HandlerData), data.?));
+                switch (k_down.scancode) {
+                    .q => {
+                        if (k_down.modifiers.get(.left_control) or k_down.modifiers.get(.right_control)) {
+                            // this is not super fair, but since this basically quits, we can do so
+                            const ev_type = try sdl.registerEvents(1);
+                            try sdl.pushEvent(ev_type, sdlvk.quit_event_code, null, null);
+                        }
+                    },
+                    else => return handler.keyDownCb.?(k_down, data),
+                }
+            }
+        }.fun,
+    });
 }; // Menu
 
 pub fn Menus(comptime names: []const []const u8) type {

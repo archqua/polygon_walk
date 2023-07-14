@@ -10,6 +10,7 @@ const text = @import("text.zig");
 const util = @import("util");
 const alg = @import("alg.zig");
 const shape = @import("shape.zig");
+const rigid = @import("rigid.zig");
 
 const UI = @import("ui.zig");
 
@@ -77,6 +78,34 @@ pub fn main() !void {
     // no need to flush coherent memory
     graphics.vkd.unmapMemory(graphics.device, graphics.uniform_buffer.memory);
 
+    // player variables
+    var player_rot: f32 = 0.0;
+    var player_shape0 = shape.Shape2{ .triangle = .{
+        .{ -0.1,  0.1 },
+        .{  0.0, -0.2 },
+        .{  0.1,  0.1 },
+    }};
+    try shape.apply2(.{.rotation = -0.5*std.math.pi}, &player_shape0);
+    std.debug.print("{any}\n", .{player_shape0.triangle});
+    // var tru = true;
+    // if (tru)
+    //     @panic("enough");
+    var player_shape = player_shape0;
+    var player_drawable = try shape.colorize2(
+        player_shape, .triangle_list, .{ .Value = util.color.RGBAf.white }, ator,
+    );
+    defer {
+        ator.free(player_drawable.indices);
+        ator.free(player_drawable.vertices);
+    }
+    var player_node = Graphics.PrimitiveCollection.Node{
+        .next = null,
+        .data = player_drawable,
+    };
+    
+    var player_body = rigid.Body2{};
+    var time: i64 = std.time.milliTimestamp();
+
 
     MAIN_LOOP: while (true) {
         // while (sdl.pollEvent()) |event| {
@@ -92,6 +121,7 @@ pub fn main() !void {
         }
         switch (handler_and_data.handler_type) {
             .menu => {
+                time = std.time.milliTimestamp();
                 const hdata = @ptrCast(*UI.Menu.HandlerData,
                     @alignCast(@alignOf(UI.Menu.HandlerData), handler_and_data.data.?));
                 if (switched_into_game) {
@@ -130,7 +160,12 @@ pub fn main() !void {
                 }
             },
             .game => {
+                const new_time = std.time.milliTimestamp();
+                // this relies on time update at .menu => switch branch
+                const dt = 1.0e-03 * @intToFloat(f32, new_time - time);
+                time = new_time;
                 if (!switched_into_game) {
+                    // get rid of menu
                     for (&cur_menu_drawables) |*l| {
                         while (l.popFirst()) |n| {
                             ator.free(n.data.indices);
@@ -140,14 +175,53 @@ pub fn main() !void {
                     }
                     graphics.drawable_state.lists[ui_obj_index] = cur_menu_drawables[0];
                     graphics.drawable_state.lists[ui_fg_index]  = cur_menu_drawables[1];
-
-                    const _cap_info = graphics.updateDrawableStateInfo();
-                    try graphics.updateVertexIndexBuffer(_cap_info);
+                    
+                    // make sure player is drawn
+                    graphics.drawable_state.lists[obj_index] = .{.first = &player_node};
 
                     switched_into_game = true;
                 }
+
+                const mouse_state = sdl.getMouseState();
+                const cur_x = (@intToFloat(f32, mouse_state.x) - 640.0) / 360.0;
+                const cur_y = (@intToFloat(f32, mouse_state.y) - 360.0) / 360.0;
+                const cur_d = std.math.sqrt(cur_x*cur_x + cur_y*cur_y);
+                if (cur_d > 1.0e-04) {
+                    const c = cur_x / cur_d;
+                    var cur_ang = std.math.acos(c);
+                    if (cur_y > 0.0)
+                        cur_ang *= -1.0;
+
+                    var diff = cur_ang - player_rot;
+                    var diff_candidate = -std.math.sign(diff) * (2.0*std.math.pi - @fabs(diff));
+                    if (@fabs(diff_candidate) < @fabs(diff))
+                        diff = diff_candidate;
+                    const torque = 8.0*(
+                        2.0*std.math.sign(diff) + diff + 0.5*std.math.sign(diff)*diff*diff
+                        - player_body.ang_velocity / (0.5 + @fabs(diff) + 2.0*diff*diff)
+                    );
+                    const ang_vel_shift = player_body.exertTorsion(torque, dt);
+                    const player_velocities = player_body.midPointStep(.{0.0, 0.0}, ang_vel_shift);
+                    player_rot += player_velocities.angular * dt;
+                    player_rot = @rem(player_rot + std.math.pi, 2.0*std.math.pi) - std.math.pi;
+                    // std.debug.print("{}\n", .{cur_ang / std.math.pi});
+                    try shape.cpy2(&player_shape, player_shape0);
+                    try shape.apply2(.{.rotation = player_rot}, &player_shape);
+                    try shape.colorizeInplace2(
+                        player_shape, .triangle_list, .{.Value = util.color.RGBAf.white}, player_drawable,
+                    );
+                    // for (player_shape.triangle) |vx| {
+                    //     std.debug.print("{}, {}, ", .{vx[0], vx[1]});
+                    // }
+                    // std.debug.print("\n", .{});
+                    if (std.math.isNan(player_shape.triangle[0][0]))
+                        break: MAIN_LOOP;
+                }
             },
         }
+
+        const _cap_info = graphics.updateDrawableStateInfo();
+        try graphics.updateVertexIndexBuffer(_cap_info);
 
         const img_idx = try graphics.beginFrame(~@as(u64, 0));
         try graphics.renderFrame(img_idx.?);
@@ -181,7 +255,7 @@ var handler_and_data = HandlerAndData{
     .handler_type = .menu,
     .data = &main_menu_handler_data,
 };
-const menu_handler = UI.Menu.handler;
+const menu_handler = UI.Menu.handler_qexit;
 var main_menu_buttons = [_]UI.Button{
     .{
         .bg_color_idle = util.color.RGBAf{.r = 0.0, .g = 0.6, .b = 0.0},
