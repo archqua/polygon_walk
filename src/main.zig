@@ -86,10 +86,6 @@ pub fn main() !void {
         .{  0.1,  0.1 },
     }};
     try shape.apply2(.{.rotation = -0.5*std.math.pi}, &player_shape0);
-    std.debug.print("{any}\n", .{player_shape0.triangle});
-    // var tru = true;
-    // if (tru)
-    //     @panic("enough");
     var player_shape = player_shape0;
     var player_drawable = try shape.colorize2(
         player_shape, .triangle_list, .{ .Value = util.color.RGBAf.white }, ator,
@@ -193,27 +189,22 @@ pub fn main() !void {
                         cur_ang *= -1.0;
 
                     var diff = cur_ang - player_rot;
-                    var diff_candidate = -std.math.sign(diff) * (2.0*std.math.pi - @fabs(diff));
-                    if (@fabs(diff_candidate) < @fabs(diff))
-                        diff = diff_candidate;
-                    const torque = 8.0*(
-                        2.0*std.math.sign(diff) + diff + 0.5*std.math.sign(diff)*diff*diff
+                    if (@fabs(diff) > std.math.pi)
+                        diff += -std.math.sign(diff) * 2.0 * std.math.pi;
+                    const torque = 12.0*(
+                        (if (@fabs(diff) > 1.0e-04) 2.0*std.math.sign(diff) else 0.0) + diff + 0.5*std.math.sign(diff)*diff*diff
                         - player_body.ang_velocity / (0.5 + @fabs(diff) + 2.0*diff*diff)
                     );
                     const ang_vel_shift = player_body.exertTorsion(torque, dt);
                     const player_velocities = player_body.midPointStep(.{0.0, 0.0}, ang_vel_shift);
                     player_rot += player_velocities.angular * dt;
-                    player_rot = @rem(player_rot + std.math.pi, 2.0*std.math.pi) - std.math.pi;
-                    // std.debug.print("{}\n", .{cur_ang / std.math.pi});
+                    if (@fabs(player_rot) > std.math.pi)
+                        player_rot += -std.math.sign(player_rot) * 2.0 * std.math.pi;
                     try shape.cpy2(&player_shape, player_shape0);
                     try shape.apply2(.{.rotation = player_rot}, &player_shape);
                     try shape.colorizeInplace2(
                         player_shape, .triangle_list, .{.Value = util.color.RGBAf.white}, player_drawable,
                     );
-                    // for (player_shape.triangle) |vx| {
-                    //     std.debug.print("{}, {}, ", .{vx[0], vx[1]});
-                    // }
-                    // std.debug.print("\n", .{});
                     if (std.math.isNan(player_shape.triangle[0][0]))
                         break: MAIN_LOOP;
                 }
