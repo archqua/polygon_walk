@@ -60,13 +60,13 @@ pub fn main() !void {
     }
     graphics.drawable_state.lists[ui_obj_index] = cur_menu_drawables[0];
     graphics.drawable_state.lists[ui_fg_index]  = cur_menu_drawables[1];
-    var cap_info = graphics.updateDrawableStateInfo();
-    try graphics.updateVertexIndexBuffer(cap_info);
+    // var cap_info = graphics.updateDrawableStateInfo();
+    // try graphics.updateVertexIndexBuffer(cap_info);
 
     // basically set static camera
     const ubos = [_]Graphics.UniformBufferObject{
-        .{.proj = alg.scaleAxes3(720.0/1280.0, 1.0, 1.0)},
-        .{.proj = alg.scaleAxes3(720.0/1280.0, 1.0, 1.0)},
+        .{.proj = alg.scaleAxes34(720.0/1280.0, 1.0, 1.0)},
+        .{.proj = alg.scaleAxes34(720.0/1280.0, 1.0, 1.0)},
     };
     const _data = try graphics.vkd.mapMemory(graphics.device,
         graphics.uniform_buffer.memory,
@@ -79,13 +79,13 @@ pub fn main() !void {
     graphics.vkd.unmapMemory(graphics.device, graphics.uniform_buffer.memory);
 
     // player variables
-    var player_rot: f32 = 0.0;
     var player_shape0 = shape.Shape2{ .triangle = .{
         .{ -0.1,  0.1 },
         .{  0.0, -0.2 },
         .{  0.1,  0.1 },
     }};
-    try shape.apply2(.{.rotation = -0.5*std.math.pi}, &player_shape0);
+    var player_rot: f32 = 0.0;
+    try shape.apply2(.{.rotation = 0.5*std.math.pi}, &player_shape0);
     var player_shape = player_shape0;
     var player_drawable = try shape.colorize2(
         player_shape, .triangle_list, .{ .Value = util.color.RGBAf.white }, ator,
@@ -128,8 +128,8 @@ pub fn main() !void {
                     graphics.drawable_state.lists[ui_obj_index] = cur_menu_drawables[0];
                     graphics.drawable_state.lists[ui_fg_index]  = cur_menu_drawables[1];
 
-                    const _cap_info = graphics.updateDrawableStateInfo();
-                    try graphics.updateVertexIndexBuffer(_cap_info);
+                    // const _cap_info = graphics.updateDrawableStateInfo();
+                    // try graphics.updateVertexIndexBuffer(_cap_info);
 
                     switched_into_game = false;
 
@@ -151,13 +151,13 @@ pub fn main() !void {
                     graphics.drawable_state.lists[ui_obj_index] = cur_menu_drawables[0];
                     graphics.drawable_state.lists[ui_fg_index]  = cur_menu_drawables[1];
 
-                    const _cap_info = graphics.updateDrawableStateInfo();
-                    try graphics.updateVertexIndexBuffer(_cap_info);
+                    // const _cap_info = graphics.updateDrawableStateInfo();
+                    // try graphics.updateVertexIndexBuffer(_cap_info);
                 }
-            },
+            }, // .menu switch case
             .game => {
                 const new_time = std.time.milliTimestamp();
-                // this relies on time update at .menu => switch branch
+                // this relies on time update at .menu switch case
                 const dt = 1.0e-03 * @intToFloat(f32, new_time - time);
                 time = new_time;
                 if (!switched_into_game) {
@@ -185,18 +185,19 @@ pub fn main() !void {
                 if (cur_d > 1.0e-04) {
                     const c = cur_x / cur_d;
                     var cur_ang = std.math.acos(c);
-                    if (cur_y > 0.0)
+                    if (cur_y < 0.0)
                         cur_ang *= -1.0;
 
                     var diff = cur_ang - player_rot;
                     if (@fabs(diff) > std.math.pi)
                         diff += -std.math.sign(diff) * 2.0 * std.math.pi;
-                    const torque = 12.0*(
-                        (if (@fabs(diff) > 1.0e-04) 2.0*std.math.sign(diff) else 0.0) + diff + 0.5*std.math.sign(diff)*diff*diff
+                    const torque = 16.0*(
+                        (if (@fabs(diff) > 1.0e-02) 2.0*std.math.sign(diff) else 0.0) + diff + 0.5*std.math.sign(diff)*diff*diff
                         - player_body.ang_velocity / (0.5 + @fabs(diff) + 2.0*diff*diff)
                     );
                     const ang_vel_shift = player_body.exertTorsion(torque, dt);
                     const player_velocities = player_body.midPointStep(.{0.0, 0.0}, ang_vel_shift);
+
                     player_rot += player_velocities.angular * dt;
                     if (@fabs(player_rot) > std.math.pi)
                         player_rot += -std.math.sign(player_rot) * 2.0 * std.math.pi;
@@ -205,10 +206,8 @@ pub fn main() !void {
                     try shape.colorizeInplace2(
                         player_shape, .triangle_list, .{.Value = util.color.RGBAf.white}, player_drawable,
                     );
-                    if (std.math.isNan(player_shape.triangle[0][0]))
-                        break: MAIN_LOOP;
                 }
-            },
+            }, // .game switch case
         }
 
         const _cap_info = graphics.updateDrawableStateInfo();
@@ -216,7 +215,7 @@ pub fn main() !void {
 
         const img_idx = try graphics.beginFrame(~@as(u64, 0));
         try graphics.renderFrame(img_idx.?);
-    }
+    } // MAIN_LOOP
 }
 
 
@@ -242,11 +241,11 @@ const HandlerAndData = struct {
     data: ?*anyopaque,
 };
 var handler_and_data = HandlerAndData{
-    .handler = menu_handler,
+    .handler = main_menu_handler,
     .handler_type = .menu,
     .data = &main_menu_handler_data,
 };
-const menu_handler = UI.Menu.handler_qexit;
+const main_menu_handler = UI.Menu.handler_qexit;
 var main_menu_buttons = [_]UI.Button{
     .{
         .bg_color_idle = util.color.RGBAf{.r = 0.0, .g = 0.6, .b = 0.0},
@@ -274,6 +273,7 @@ var main_menu_buttons = [_]UI.Button{
         .callback = struct {
             fn fun(data: ?*anyopaque) !void {
                 _ = data;
+                handler_and_data.handler = settings_menu_handler;
                 handler_and_data.data = &settings_menu_handler_data;
             }
         }.fun,
@@ -304,6 +304,7 @@ var main_menu_handler_data = UI.Menu.HandlerData{
     .button_data = &main_menu_button_data,
 };
 
+const settings_menu_handler = UI.Menu.bindButtons(UI.Menu.handler_qexit, &[_]?sdl.Scancode{null, .escape});
 var settings_menu_buttons = [_]UI.Button{
     .{
         .bg_color_idle = util.color.RGBAf{.r = 0.0, .g = 0.5, .b = 0.5},
@@ -324,6 +325,7 @@ var settings_menu_buttons = [_]UI.Button{
         .callback = struct {
             fn fun(data: ?*anyopaque) !void {
                 _ = data;
+                handler_and_data.handler = main_menu_handler;
                 handler_and_data.data = &main_menu_handler_data;
             }
         }.fun,
@@ -338,6 +340,7 @@ var settings_menu_handler_data = UI.Menu.HandlerData{
     .button_data = &settings_menu_button_data,
 };
 
+const in_game_menu_handler = UI.Menu.bindButtons(UI.Menu.handler_qexit, &[_]?sdl.Scancode{null, .escape});
 var in_game_menu_buttons = [_]UI.Button{
     .{
         .bg_color_idle = util.color.RGBAf{.r = 0.5, .g = 0.0, .b = 0.5},
@@ -349,6 +352,7 @@ var in_game_menu_buttons = [_]UI.Button{
         .callback = struct {
             fn fun(data: ?*anyopaque) !void {
                 _ = data;
+                handler_and_data.handler = main_menu_handler;
                 handler_and_data.data = &main_menu_handler_data;
             }
         }.fun,
@@ -412,7 +416,7 @@ const game_handler = UI.game_handler.override(.{
                 .escape => {
                     extra_info.esc_pressed = true;
                     handler_and_data.data = &in_game_menu_handler_data;
-                    handler_and_data.handler = menu_handler;
+                    handler_and_data.handler = in_game_menu_handler;
                     handler_and_data.handler_type = .menu;
                 },
                 else => return UI.game_handler.keyDownCb.?(k_down, data),

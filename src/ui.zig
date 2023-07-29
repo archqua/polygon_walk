@@ -385,6 +385,28 @@ pub const Menu = struct {
             }
         }.fun,
     });
+    pub fn bindButtons(comptime _handler: EventHandler, comptime bindings: anytype) EventHandler {
+        return _handler.override(.{
+            .keyDownCb = struct {
+                fn fun(k_down: sdl.KeyboardEvent, data: ?*anyopaque) !void {
+                    const info = @ptrCast(*HandlerData, @alignCast(@alignOf(HandlerData), data.?));
+                    for (bindings, 0..) |binding, button_idx| {
+                        if (binding) |scancode| {
+                            if (k_down.scancode == scancode) {
+                                if (info.menu.active_button != button_idx) {
+                                    info.menu.active_button = @intCast(u32, button_idx);
+                                    return;
+                                } else {
+                                    return info.menu.buttons[button_idx].callback.?(info.button_data[button_idx]);
+                                }
+                            }
+                        }
+                    }
+                    return _handler.keyDownCb.?(k_down, data);
+                }
+            }.fun,
+        });
+    }
 }; // Menu
 
 pub fn Menus(comptime names: []const []const u8) type {
